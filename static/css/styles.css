@@ -515,6 +515,140 @@ button:hover {
 }
 
 .no-emails p {
+    color: var(--gray);
     font-size: 16px;
+    margin-top: 10px;
+}
+
+/* Load more functionality */
+.load-more-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    margin-top: 20px;
+    margin-bottom: 40px;
+}
+
+.load-more-btn {
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    width: 200px;
+    text-align: center;
+}
+
+.load-more-btn:hover {
+    background-color: #0d5bcd;
+}
+
+.loading-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.loading-more .spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(0, 0, 0, 0.1);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.fetch-status {
+    font-size: 14px;
+    color: var(--gray);
+    margin-top: 10px;
+    text-align: center;
+}
+
+/* Domain section styles */
+.domain-section {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-bottom: 15px;
+    overflow: hidden;
+}
+
+.domain-section .domain-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    background-color: var(--primary-light);
+    border-bottom: 1px solid var(--border);
+}
+
+.domain-section .domain-checkbox {
+    margin-right: 10px;
+}
+
+.domain-section .domain-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--primary);
+}
+
+.domain-section .email-count {
+    font-size: 14px;
+    font-weight: normal;
+    color: var(--gray);
+    margin-left: 5px;
+}
+
+.domain-section .email-items {
+    padding: 0;
+}
+
+/* Email item styles */
+.email-item {
+    display: flex;
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.email-item:hover {
+    background-color: var(--light-gray);
+}
+
+.email-item.active {
+    background-color: var(--primary-light);
+}
+
+.email-checkbox-container {
+    margin-right: 10px;
+}
+
+.email-content {
+    flex: 1;
+}
+
+.email-sender {
+    font-weight: 500;
+    margin-bottom: 5px;
+}
+
+.email-subject {
+    color: var(--dark);
+    margin-bottom: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.email-date {
+    font-size: 12px;
     color: var(--gray);
 }

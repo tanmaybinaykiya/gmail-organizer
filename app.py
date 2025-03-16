@@ -17,7 +17,8 @@ app = Flask(__name__)
 SCOPES = ['https://mail.google.com/']
 CACHE_DIR = 'email_cache'
 CACHE_EXPIRY = 24  # Cache expiry in hours
-MAX_EMAILS = 100  # Maximum number of emails to fetch
+MAX_EMAILS_PER_PAGE = 500  # Maximum number of emails to fetch per page
+MAX_TOTAL_EMAILS = 10000  # Maximum total emails to fetch
 
 # Create cache directory if it doesn't exist
 if not os.path.exists(CACHE_DIR):
@@ -86,11 +87,18 @@ def index():
     # Try to load from cache first
     cached_data = load_from_cache('list')
     if cached_data:
-        # Sort the cached data by number of emails in each domain
-        sorted_data = dict(sorted(cached_data['grouped'].items(),
-                                 key=lambda item: len(item[1]),
-                                 reverse=True))
-        return render_template('index.html', grouped=sorted_data, total_unread=cached_data['total_unread'])
+        # Check if the cached data has the expected structure
+        if isinstance(cached_data, dict) and 'grouped' in cached_data and 'total_unread' in cached_data:
+            # Sort the cached data by number of emails in each domain
+            sorted_data = dict(sorted(cached_data['grouped'].items(),
+                                     key=lambda item: len(item[1]),
+                                     reverse=True))
+            return render_template('index.html', grouped=sorted_data, total_unread=cached_data['total_unread'])
+        else:
+            # If cache structure is invalid, remove it
+            list_cache = os.path.join(CACHE_DIR, 'list_cache.pkl')
+            if os.path.exists(list_cache):
+                os.remove(list_cache)
 
     # If no valid cache, fetch from Gmail API
     service = get_gmail_service()
@@ -104,30 +112,51 @@ def index():
 
     total_unread = result.get('resultSizeEstimate', 0)
 
-    # Now fetch the actual unread messages
-    results = service.users().messages().list(
-        userId='me',
-        q='is:unread',
-        maxResults=MAX_EMAILS
-    ).execute()
-
-    messages = results.get('messages', [])
+    # Now fetch the unread messages with pagination
     email_data = []
+    next_page_token = None
+    page_count = 0
 
-    for msg in messages:
-        msg_detail = service.users().messages().get(userId='me', id=msg['id']).execute()
-        headers = msg_detail['payload']['headers']
-        sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
-        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-        date = next((h['value'] for h in headers if h['name'] == 'Date'), '')
-        domain = extract_domain(sender)
-        email_data.append({
-            'id': msg['id'],
-            'sender': sender,
-            'subject': subject,
-            'date': date,
-            'domain': domain
-        })
+    while len(email_data) < MAX_TOTAL_EMAILS:
+        # Fetch a page of messages
+        results = service.users().messages().list(
+            userId='me',
+            q='is:unread',
+            maxResults=MAX_EMAILS_PER_PAGE,
+            pageToken=next_page_token
+        ).execute()
+
+        messages = results.get('messages', [])
+        if not messages:
+            break  # No more messages to fetch
+
+        page_count += 1
+        print(f"Fetching page {page_count}, emails so far: {len(email_data)}")
+
+        # Process each message in the current page
+        for msg in messages:
+            msg_detail = service.users().messages().get(userId='me', id=msg['id']).execute()
+            headers = msg_detail['payload']['headers']
+            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+            date = next((h['value'] for h in headers if h['name'] == 'Date'), '')
+            domain = extract_domain(sender)
+            email_data.append({
+                'id': msg['id'],
+                'sender': sender,
+                'subject': subject,
+                'date': date,
+                'domain': domain
+            })
+
+        # Check if there are more pages
+        next_page_token = results.get('nextPageToken')
+        if not next_page_token:
+            break  # No more pages
+
+        # If we've fetched enough emails, stop
+        if len(email_data) >= MAX_TOTAL_EMAILS:
+            break
 
     df = pd.DataFrame(email_data)
 
@@ -151,6 +180,56 @@ def index():
     save_to_cache(cache_data, 'list')
 
     return render_template('index.html', grouped=sorted_grouped, total_unread=total_unread)
+
+# Add a route for incremental fetching
+@app.route('/fetch-more', methods=['GET'])
+def fetch_more():
+    page_token = request.args.get('page_token', None)
+    current_count = int(request.args.get('current_count', 0))
+
+    service = get_gmail_service()
+
+    # Fetch the next page of messages
+    results = service.users().messages().list(
+        userId='me',
+        q='is:unread',
+        maxResults=MAX_EMAILS_PER_PAGE,
+        pageToken=page_token
+    ).execute()
+
+    messages = results.get('messages', [])
+    email_data = []
+
+    for msg in messages:
+        msg_detail = service.users().messages().get(userId='me', id=msg['id']).execute()
+        headers = msg_detail['payload']['headers']
+        sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+        date = next((h['value'] for h in headers if h['name'] == 'Date'), '')
+        domain = extract_domain(sender)
+        email_data.append({
+            'id': msg['id'],
+            'sender': sender,
+            'subject': subject,
+            'date': date,
+            'domain': domain
+        })
+
+    # Process the new data
+    df = pd.DataFrame(email_data)
+    if not df.empty:
+        grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
+    else:
+        grouped = {}
+
+    next_page_token = results.get('nextPageToken')
+
+    return jsonify({
+        'emails': grouped,
+        'next_page_token': next_page_token,
+        'count': len(email_data),
+        'total_fetched': current_count + len(email_data)
+    })
 
 # Get email content for preview
 @app.route('/email/<email_id>', methods=['GET'])

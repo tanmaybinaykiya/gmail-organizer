@@ -54,29 +54,26 @@
 
                     {% if grouped %}
                         {% for domain, emails in grouped.items() %}
-                        {% set domain_index = loop.index %}
-                        <div class="domain-group">
+                        <div class="domain-section" data-domain="{{ domain }}">
                             <div class="domain-header">
-                                <h2>
-                                    <i class="fas fa-globe"></i>
-                                    {{ domain }}
-                                    <span class="count">{{ emails|length }}</span>
-                                </h2>
-                                <div class="domain-actions">
-                                    <input type="checkbox" id="select-domain-{{ domain_index }}" class="custom-checkbox select-domain">
-                                    <label for="select-domain-{{ domain_index }}">Select All</label>
+                                <div class="domain-checkbox">
+                                    <input type="checkbox" id="select-domain-{{ domain }}" class="select-domain">
+                                    <label for="select-domain-{{ domain }}"></label>
                                 </div>
+                                <h2 class="domain-name">{{ domain }} <span class="email-count">({{ emails|length }})</span></h2>
                             </div>
 
-                            <div class="email-list">
+                            <div class="email-items" id="domain-emails-{{ domain }}">
                                 {% for email in emails %}
                                 <div class="email-item" data-email-id="{{ email.id }}">
-                                    <div class="checkbox-container" onclick="event.stopPropagation();">
-                                        <input type="checkbox" name="email_ids" value="{{ email.id }}" class="custom-checkbox email-checkbox" data-domain="{{ domain_index }}">
+                                    <div class="email-checkbox-container">
+                                        <input type="checkbox" id="email-{{ email.id }}" class="email-checkbox" data-domain="{{ domain }}" name="email_ids" value="{{ email.id }}">
+                                        <label for="email-{{ email.id }}"></label>
                                     </div>
                                     <div class="email-content">
-                                        <div class="sender">{{ email.sender }}</div>
+                                        <div class="email-sender">{{ email.sender }}</div>
                                         <div class="email-subject">{{ email.subject }}</div>
+                                        <div class="email-date">{{ email.date }}</div>
                                     </div>
                                 </div>
                                 {% endfor %}
