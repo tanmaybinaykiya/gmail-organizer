@@ -33,7 +33,7 @@
             <form action="/action" method="post" id="email-action-form">
                 <div class="global-actions">
                     <div class="action-controls-container">
-                        <div class="action-label">Action for selected emails:</div>
+                        <div class="action-label">Action for selected emails:<span id="selected-count" class="selected-count">(0 selected)</span></div>
                         <div class="action-controls">
                             <select name="action_type" id="global-action-type">
                                 <option value="read">Mark as Read</option>
@@ -41,7 +41,7 @@
                                 <option value="archive">Archive</option>
                             </select>
 
-                            <button type="submit">
+                            <button type="submit" id="apply-action-btn" disabled>
                                 <i class="fas fa-check"></i>
                                 Apply
                             </button>

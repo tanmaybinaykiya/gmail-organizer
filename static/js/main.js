@@ -10,6 +10,25 @@ document.addEventListener('DOMContentLoaded', function() {
     let updateInterval = null;
     let initialLoadComplete = false;
     let isPaused = false;
+    let selectedEmailCount = 0; // Track number of selected emails
+
+    // Function to update selected email count
+    function updateSelectedCount() {
+        const checkedEmails = document.querySelectorAll('.email-checkbox:checked');
+        selectedEmailCount = checkedEmails.length;
+
+        // Update the count display
+        const selectedCountEl = document.getElementById('selected-count');
+        if (selectedCountEl) {
+            selectedCountEl.textContent = `(${selectedEmailCount} selected)`;
+        }
+
+        // Enable/disable the apply button
+        const applyBtn = document.getElementById('apply-action-btn');
+        if (applyBtn) {
+            applyBtn.disabled = selectedEmailCount === 0;
+        }
+    }
 
     // Setup collapsible domain sections
     function setupCollapsibleDomains() {
@@ -472,6 +491,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     const checkbox = emailItem.querySelector('.email-checkbox');
                     checkbox.addEventListener('change', function() {
                         updateDomainCheckbox(domain);
+
+                        // Update selected count when checkbox changes
+                        updateSelectedCount();
                     });
 
                     // Add to existing IDs set
@@ -633,6 +655,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
                         // Add click event for preview
                         emailItem.addEventListener('click', handleEmailClick);
+
+                        // Add change event for checkbox
+                        const checkbox = emailItem.querySelector('.email-checkbox');
+                        checkbox.addEventListener('change', function() {
+                            updateDomainCheckbox(domain);
+
+                            // Update selected count when checkbox changes
+                            updateSelectedCount();
+                        });
                     }
                 }
 
@@ -735,6 +766,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     emailCheckboxes.forEach(cb => {
                         cb.checked = this.checked;
                     });
+
+                    // Update selected count after changing checkboxes
+                    updateSelectedCount();
                 });
             }
         });
@@ -747,6 +781,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 checkbox.addEventListener('change', function() {
                     const domainId = this.dataset.domain;
                     updateDomainCheckbox(domainId);
+
+                    // Update selected count when checkbox changes
+                    updateSelectedCount();
                 });
             }
         });
@@ -754,6 +791,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initial setup of checkboxes
     setupCheckboxes();
+
+    // Initial update of selected count
+    updateSelectedCount();
 
     // Function to update domain checkbox state
     function updateDomainCheckbox(domainId) {

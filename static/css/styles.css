@@ -476,6 +476,13 @@ button:hover {
     font-weight: 500;
 }
 
+.selected-count {
+    font-size: 13px;
+    color: var(--primary);
+    font-weight: 500;
+    margin-left: 5px;
+}
+
 .action-controls {
     display: flex;
     align-items: center;
