@@ -12,6 +12,10 @@ document.addEventListener('DOMContentLoaded', function() {
     let isPaused = false;
     let selectedEmailCount = 0; // Track number of selected emails
 
+    // Store domain pagination state
+    const domainPagination = {};
+    const EMAILS_PER_PAGE = 10; // Number of emails to show per page for each domain
+
     // Function to update selected email count
     function updateSelectedCount() {
         const checkedEmails = document.querySelectorAll('.email-checkbox:checked');
@@ -71,8 +75,195 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Initialize pagination for a domain
+    function initDomainPagination(domain) {
+        if (!domainPagination[domain]) {
+            domainPagination[domain] = {
+                currentPage: 1,
+                totalPages: 1,
+                selectedEmails: new Set() // Track selected emails by ID
+            };
+        }
+
+        const domainSection = document.querySelector(`.domain-section[data-domain="${domain}"]`);
+        if (!domainSection) return;
+
+        const emailItems = domainSection.querySelectorAll('.email-item');
+        const totalEmails = emailItems.length;
+        const totalPages = Math.ceil(totalEmails / EMAILS_PER_PAGE);
+
+        domainPagination[domain].totalPages = totalPages;
+
+        // Create or update pagination controls
+        let paginationContainer = domainSection.querySelector('.domain-pagination');
+        if (!paginationContainer) {
+            paginationContainer = document.createElement('div');
+            paginationContainer.className = 'domain-pagination';
+
+            // Add pagination container after email items
+            const emailItemsContainer = domainSection.querySelector('.email-items');
+            if (emailItemsContainer) {
+                emailItemsContainer.after(paginationContainer);
+            }
+        }
+
+        // Only show pagination if there are multiple pages
+        if (totalPages <= 1) {
+            paginationContainer.style.display = 'none';
+            return;
+        } else {
+            paginationContainer.style.display = 'flex';
+        }
+
+        // Update pagination controls
+        paginationContainer.innerHTML = `
+            <div class="domain-pagination-info">
+                Showing page ${domainPagination[domain].currentPage} of ${totalPages}
+            </div>
+            <div class="domain-pagination-controls">
+                <button class="domain-pagination-button prev-page" ${domainPagination[domain].currentPage === 1 ? 'disabled' : ''}>
+                    <i class="fas fa-chevron-left"></i> Prev
+                </button>
+                <div class="domain-pagination-page">${domainPagination[domain].currentPage} / ${totalPages}</div>
+                <button class="domain-pagination-button next-page" ${domainPagination[domain].currentPage === totalPages ? 'disabled' : ''}>
+                    Next <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        `;
+
+        // Add event listeners to pagination buttons
+        const prevButton = paginationContainer.querySelector('.prev-page');
+        const nextButton = paginationContainer.querySelector('.next-page');
+
+        prevButton.addEventListener('click', function() {
+            if (domainPagination[domain].currentPage > 1) {
+                changePage(domain, domainPagination[domain].currentPage - 1);
+            }
+        });
+
+        nextButton.addEventListener('click', function() {
+            if (domainPagination[domain].currentPage < totalPages) {
+                changePage(domain, domainPagination[domain].currentPage + 1);
+            }
+        });
+
+        // Show the current page
+        showDomainPage(domain, domainPagination[domain].currentPage);
+    }
+
+    // Change page for a domain
+    function changePage(domain, pageNumber) {
+        if (!domainPagination[domain]) return;
+
+        // Save current page's selected emails
+        saveSelectedEmails(domain);
+
+        // Update current page
+        domainPagination[domain].currentPage = pageNumber;
+
+        // Show the new page
+        showDomainPage(domain, pageNumber);
+
+        // Update pagination controls
+        const domainSection = document.querySelector(`.domain-section[data-domain="${domain}"]`);
+        if (!domainSection) return;
+
+        const paginationInfo = domainSection.querySelector('.domain-pagination-info');
+        if (paginationInfo) {
+            paginationInfo.textContent = `Showing page ${pageNumber} of ${domainPagination[domain].totalPages}`;
+        }
+
+        const paginationPage = domainSection.querySelector('.domain-pagination-page');
+        if (paginationPage) {
+            paginationPage.textContent = `${pageNumber} / ${domainPagination[domain].totalPages}`;
+        }
+
+        const prevButton = domainSection.querySelector('.prev-page');
+        if (prevButton) {
+            prevButton.disabled = pageNumber === 1;
+        }
+
+        const nextButton = domainSection.querySelector('.next-page');
+        if (nextButton) {
+            nextButton.disabled = pageNumber === domainPagination[domain].totalPages;
+        }
+    }
+
+    // Show a specific page for a domain
+    function showDomainPage(domain, pageNumber) {
+        const domainSection = document.querySelector(`.domain-section[data-domain="${domain}"]`);
+        if (!domainSection) return;
+
+        const emailItems = domainSection.querySelectorAll('.email-item');
+        const startIndex = (pageNumber - 1) * EMAILS_PER_PAGE;
+        const endIndex = startIndex + EMAILS_PER_PAGE;
+
+        // Hide all emails first
+        emailItems.forEach((item, index) => {
+            if (index >= startIndex && index < endIndex) {
+                item.classList.remove('hidden-page');
+            } else {
+                item.classList.add('hidden-page');
+            }
+        });
+
+        // Restore selected state for visible emails
+        restoreSelectedEmails(domain);
+    }
+
+    // Save selected emails for a domain
+    function saveSelectedEmails(domain) {
+        const domainSection = document.querySelector(`.domain-section[data-domain="${domain}"]`);
+        if (!domainSection) return;
+
+        // Clear previous selections for this domain
+        domainPagination[domain].selectedEmails = new Set();
+
+        // Save all checked emails
+        const checkedEmails = domainSection.querySelectorAll('.email-checkbox:checked');
+        checkedEmails.forEach(checkbox => {
+            domainPagination[domain].selectedEmails.add(checkbox.value);
+        });
+    }
+
+    // Restore selected emails for a domain
+    function restoreSelectedEmails(domain) {
+        if (!domainPagination[domain] || !domainPagination[domain].selectedEmails) return;
+
+        const domainSection = document.querySelector(`.domain-section[data-domain="${domain}"]`);
+        if (!domainSection) return;
+
+        // Get all visible email checkboxes
+        const emailCheckboxes = domainSection.querySelectorAll('.email-item:not(.hidden-page) .email-checkbox');
+
+        // Check the ones that were previously selected
+        emailCheckboxes.forEach(checkbox => {
+            if (domainPagination[domain].selectedEmails.has(checkbox.value)) {
+                checkbox.checked = true;
+            }
+        });
+
+        // Update domain checkbox state
+        updateDomainCheckbox(domain);
+
+        // Update total selected count
+        updateSelectedCount();
+    }
+
+    // Initialize pagination for all domains
+    function initAllDomainPagination() {
+        const domainSections = document.querySelectorAll('.domain-section');
+        domainSections.forEach(section => {
+            const domain = section.getAttribute('data-domain');
+            if (domain) {
+                initDomainPagination(domain);
+            }
+        });
+    }
+
     // Call setup on initial load
     setupCollapsibleDomains();
+    initAllDomainPagination();
 
     // Fetch control elements
     const pauseBtn = document.getElementById('pause-fetch-btn');
@@ -454,6 +645,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (collapsedDomains[domain]) {
                     domainSection.classList.add('collapsed');
                 }
+
+                // Initialize pagination for the new domain
+                initDomainPagination(domain);
             }
 
             // Get the email items container for this domain
@@ -513,6 +707,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Re-sort domain sections by email count
         sortDomainSections();
+
+        // Re-initialize pagination for all domains
+        initAllDomainPagination();
     }
 
     // Function to sort domain sections by email count
@@ -673,6 +870,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Re-sort domain sections by email count
                 sortDomainSections();
 
+                // Re-initialize pagination for all domains
+                initAllDomainPagination();
+
                 // Update UI
                 const loadMoreBtn = document.getElementById('load-more-btn');
                 const loadingMore = document.querySelector('.loading-more');
@@ -787,6 +987,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
         });
+
+        // After setting up checkboxes, restore selected state
+        for (const domain in domainPagination) {
+            restoreSelectedEmails(domain);
+        }
     }
 
     // Initial setup of checkboxes

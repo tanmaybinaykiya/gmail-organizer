@@ -954,3 +954,60 @@ button {
 #modal-error {
     color: var(--danger);
 }
+
+/* Domain pagination styles */
+.domain-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: var(--light-gray);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.domain-pagination-info {
+    color: var(--gray);
+}
+
+.domain-pagination-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.domain-pagination-button {
+    background-color: white;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    color: var(--primary);
+    font-size: 12px;
+    transition: background-color 0.2s;
+}
+
+.domain-pagination-button:hover:not(:disabled) {
+    background-color: var(--primary-light);
+}
+
+.domain-pagination-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    color: var(--gray);
+}
+
+.domain-pagination-button i {
+    font-size: 10px;
+}
+
+.domain-pagination-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 60px;
+}
+
+/* Hide emails that are not in the current page */
+.email-items .email-item.hidden-page {
+    display: none;
+}
