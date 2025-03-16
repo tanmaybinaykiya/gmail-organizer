@@ -6,6 +6,7 @@ import re
 import html
 import pickle
 import time
+import threading
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, jsonify
 from google.oauth2.credentials import Credentials
@@ -17,12 +18,22 @@ app = Flask(__name__)
 SCOPES = ['https://mail.google.com/']
 CACHE_DIR = 'email_cache'
 CACHE_EXPIRY = 24  # Cache expiry in hours
-MAX_EMAILS_PER_PAGE = 500  # Maximum number of emails to fetch per page
+MAX_EMAILS_PER_PAGE = 100  # Maximum number of emails to fetch per page (reduced for faster initial load)
 MAX_TOTAL_EMAILS = 10000  # Maximum total emails to fetch
 
 # Create cache directory if it doesn't exist
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
+
+# Global variables to track fetching status
+fetch_status = {
+    'is_fetching': False,
+    'total_emails': 0,
+    'fetched_emails': 0,
+    'next_page_token': None,
+    'grouped_emails': {},
+    'error': None
+}
 
 # Authenticate with Google
 def get_gmail_service():
@@ -81,105 +92,264 @@ def load_from_cache(cache_type='list'):
             print(f"Error loading cache: {e}")
     return None
 
+# Save pagination state
+def save_pagination_state(next_page_token, fetched_count, total_count):
+    state = {
+        'next_page_token': next_page_token,
+        'fetched_count': fetched_count,
+        'total_count': total_count,
+        'timestamp': datetime.now().timestamp()
+    }
+    with open(os.path.join(CACHE_DIR, 'pagination_state.json'), 'w') as f:
+        json.dump(state, f)
+
+# Load pagination state
+def load_pagination_state():
+    state_file = os.path.join(CACHE_DIR, 'pagination_state.json')
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+
+            # Check if state is still valid (less than 1 hour old)
+            if datetime.now().timestamp() - state.get('timestamp', 0) < 3600:
+                return state
+        except Exception as e:
+            print(f"Error loading pagination state: {e}")
+    return None
+
+# Fetch a batch of emails
+def fetch_email_batch(page_token=None):
+    service = get_gmail_service()
+
+    # Get total unread count if we don't have it yet
+    if fetch_status['total_emails'] == 0:
+        result = service.users().messages().list(
+            userId='me',
+            q='is:unread',
+            maxResults=1
+        ).execute()
+        fetch_status['total_emails'] = result.get('resultSizeEstimate', 0)
+
+    # Fetch a page of messages
+    results = service.users().messages().list(
+        userId='me',
+        q='is:unread',
+        maxResults=MAX_EMAILS_PER_PAGE,
+        pageToken=page_token
+    ).execute()
+
+    messages = results.get('messages', [])
+    email_data = []
+
+    # Process each message in the current page
+    for msg in messages:
+        msg_detail = service.users().messages().get(userId='me', id=msg['id']).execute()
+        headers = msg_detail['payload']['headers']
+        sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+        date = next((h['value'] for h in headers if h['name'] == 'Date'), '')
+        domain = extract_domain(sender)
+        email_data.append({
+            'id': msg['id'],
+            'sender': sender,
+            'subject': subject,
+            'date': date,
+            'domain': domain
+        })
+
+    # Get next page token
+    next_page_token = results.get('nextPageToken')
+
+    return email_data, next_page_token
+
+# Sort grouped emails by count
+def sort_grouped_emails(grouped_emails):
+    return dict(sorted(grouped_emails.items(), key=lambda item: len(item[1]), reverse=True))
+
+# Background task to fetch emails
+def fetch_emails_background():
+    global fetch_status
+    try:
+        # Load existing emails from cache
+        cached_data = load_from_cache('list')
+        if cached_data and isinstance(cached_data, dict) and 'grouped' in cached_data:
+            email_data = []
+            for domain, emails in cached_data['grouped'].items():
+                email_data.extend(emails)
+
+            # Update fetch status with cached data
+            fetch_status['fetched_emails'] = len(email_data)
+            fetch_status['grouped_emails'] = cached_data['grouped']
+
+            # Load pagination state
+            pagination_state = load_pagination_state()
+            if pagination_state:
+                fetch_status['next_page_token'] = pagination_state.get('next_page_token')
+                fetch_status['total_emails'] = pagination_state.get('total_count', 0)
+        else:
+            email_data = []
+
+        # Continue fetching from where we left off
+        next_page_token = fetch_status['next_page_token']
+
+        while len(email_data) < MAX_TOTAL_EMAILS:
+            # Fetch a batch of emails
+            new_emails, next_page_token = fetch_email_batch(next_page_token)
+
+            if not new_emails:
+                break  # No more emails to fetch
+
+            # Add new emails to the list
+            email_data.extend(new_emails)
+
+            # Update fetch status
+            fetch_status['fetched_emails'] = len(email_data)
+            fetch_status['next_page_token'] = next_page_token
+
+            # Save pagination state
+            save_pagination_state(next_page_token, len(email_data), fetch_status['total_emails'])
+
+            # Process and update grouped emails
+            df = pd.DataFrame(email_data)
+            if not df.empty:
+                grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
+                sorted_grouped = sort_grouped_emails(grouped)
+                fetch_status['grouped_emails'] = sorted_grouped
+
+                # Save to cache
+                cache_data = {
+                    'grouped': sorted_grouped,
+                    'total_unread': fetch_status['total_emails']
+                }
+                save_to_cache(cache_data, 'list')
+
+            # If no more pages, break
+            if not next_page_token:
+                break
+
+            # If we've fetched enough emails, stop
+            if len(email_data) >= MAX_TOTAL_EMAILS:
+                break
+
+            # Small delay to prevent API rate limiting
+            time.sleep(0.5)
+
+        # Final update to cache
+        if email_data:
+            df = pd.DataFrame(email_data)
+            if not df.empty:
+                grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
+                sorted_grouped = sort_grouped_emails(grouped)
+            else:
+                sorted_grouped = {}
+
+            cache_data = {
+                'grouped': sorted_grouped,
+                'total_unread': fetch_status['total_emails']
+            }
+            save_to_cache(cache_data, 'list')
+            fetch_status['grouped_emails'] = sorted_grouped
+
+        fetch_status['is_fetching'] = False
+
+    except Exception as e:
+        print(f"Error fetching emails: {e}")
+        fetch_status['error'] = str(e)
+        fetch_status['is_fetching'] = False
+
 # Fetch emails and classify
 @app.route('/')
 def index():
+    global fetch_status
+
     # Try to load from cache first
     cached_data = load_from_cache('list')
-    if cached_data:
-        # Check if the cached data has the expected structure
-        if isinstance(cached_data, dict) and 'grouped' in cached_data and 'total_unread' in cached_data:
-            # Sort the cached data by number of emails in each domain
-            sorted_data = dict(sorted(cached_data['grouped'].items(),
-                                     key=lambda item: len(item[1]),
-                                     reverse=True))
-            return render_template('index.html', grouped=sorted_data, total_unread=cached_data['total_unread'])
-        else:
-            # If cache structure is invalid, remove it
-            list_cache = os.path.join(CACHE_DIR, 'list_cache.pkl')
-            if os.path.exists(list_cache):
-                os.remove(list_cache)
+    initial_data = None
 
-    # If no valid cache, fetch from Gmail API
-    service = get_gmail_service()
+    if cached_data and isinstance(cached_data, dict) and 'grouped' in cached_data and 'total_unread' in cached_data:
+        # Use cached data for initial render
+        initial_data = sort_grouped_emails(cached_data['grouped'])
+        total_unread = cached_data['total_unread']
 
-    # Get total unread count first
-    result = service.users().messages().list(
-        userId='me',
-        q='is:unread',
-        maxResults=1
-    ).execute()
+        # Start background fetching to update cache
+        if not fetch_status['is_fetching']:
+            fetch_status['is_fetching'] = True
+            fetch_status['grouped_emails'] = initial_data
+            fetch_status['total_emails'] = total_unread
+            fetch_status['fetched_emails'] = sum(len(emails) for emails in initial_data.values())
 
-    total_unread = result.get('resultSizeEstimate', 0)
+            thread = threading.Thread(target=fetch_emails_background)
+            thread.daemon = True
+            thread.start()
 
-    # Now fetch the unread messages with pagination
-    email_data = []
-    next_page_token = None
-    page_count = 0
-
-    while len(email_data) < MAX_TOTAL_EMAILS:
-        # Fetch a page of messages
-        results = service.users().messages().list(
-            userId='me',
-            q='is:unread',
-            maxResults=MAX_EMAILS_PER_PAGE,
-            pageToken=next_page_token
-        ).execute()
-
-        messages = results.get('messages', [])
-        if not messages:
-            break  # No more messages to fetch
-
-        page_count += 1
-        print(f"Fetching page {page_count}, emails so far: {len(email_data)}")
-
-        # Process each message in the current page
-        for msg in messages:
-            msg_detail = service.users().messages().get(userId='me', id=msg['id']).execute()
-            headers = msg_detail['payload']['headers']
-            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
-            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-            date = next((h['value'] for h in headers if h['name'] == 'Date'), '')
-            domain = extract_domain(sender)
-            email_data.append({
-                'id': msg['id'],
-                'sender': sender,
-                'subject': subject,
-                'date': date,
-                'domain': domain
-            })
-
-        # Check if there are more pages
-        next_page_token = results.get('nextPageToken')
-        if not next_page_token:
-            break  # No more pages
-
-        # If we've fetched enough emails, stop
-        if len(email_data) >= MAX_TOTAL_EMAILS:
-            break
-
-    df = pd.DataFrame(email_data)
-
-    # If no emails found, create an empty dictionary
-    if df.empty:
-        sorted_grouped = {}
+        return render_template('index.html',
+                              grouped=initial_data,
+                              total_unread=total_unread,
+                              is_loading=fetch_status['is_fetching'])
     else:
-        # Group by domain instead of category
-        grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
+        # If no cache, fetch first batch synchronously for immediate display
+        try:
+            email_data, next_page_token = fetch_email_batch()
+            fetch_status['next_page_token'] = next_page_token
 
-        # Sort the grouped data by number of emails in each domain
-        sorted_grouped = dict(sorted(grouped.items(),
-                                    key=lambda item: len(item[1]),
-                                    reverse=True))
+            if email_data:
+                df = pd.DataFrame(email_data)
+                grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
+                initial_data = sort_grouped_emails(grouped)
+                fetch_status['grouped_emails'] = initial_data
+                fetch_status['fetched_emails'] = len(email_data)
 
-    # Save to cache with total unread count
-    cache_data = {
-        'grouped': sorted_grouped,
-        'total_unread': total_unread
-    }
-    save_to_cache(cache_data, 'list')
+                # Save to cache
+                cache_data = {
+                    'grouped': initial_data,
+                    'total_unread': fetch_status['total_emails']
+                }
+                save_to_cache(cache_data, 'list')
 
-    return render_template('index.html', grouped=sorted_grouped, total_unread=total_unread)
+                # Save pagination state
+                save_pagination_state(next_page_token, len(email_data), fetch_status['total_emails'])
+            else:
+                initial_data = {}
+
+            total_unread = fetch_status['total_emails']
+        except Exception as e:
+            print(f"Error fetching initial emails: {e}")
+            initial_data = {}
+            total_unread = 0
+
+    # Start background fetching if not already running
+    if not fetch_status['is_fetching']:
+        fetch_status['is_fetching'] = True
+        thread = threading.Thread(target=fetch_emails_background)
+        thread.daemon = True
+        thread.start()
+
+    # Render the template with whatever data we have
+    return render_template('index.html',
+                          grouped=initial_data or {},
+                          total_unread=total_unread,
+                          is_loading=fetch_status['is_fetching'])
+
+# Route to check fetch status and get new emails
+@app.route('/fetch-status')
+def check_fetch_status():
+    global fetch_status
+
+    if fetch_status['error']:
+        # Error occurred
+        return jsonify({
+            'status': 'error',
+            'error': fetch_status['error']
+        })
+    else:
+        # Return current status and data
+        return jsonify({
+            'status': 'fetching' if fetch_status['is_fetching'] else 'complete',
+            'fetched': fetch_status['fetched_emails'],
+            'total': fetch_status['total_emails'],
+            'grouped': fetch_status['grouped_emails']
+        })
 
 # Add a route for incremental fetching
 @app.route('/fetch-more', methods=['GET'])
@@ -224,11 +394,15 @@ def fetch_more():
 
     next_page_token = results.get('nextPageToken')
 
+    # Save pagination state
+    total_fetched = current_count + len(email_data)
+    save_pagination_state(next_page_token, total_fetched, fetch_status['total_emails'])
+
     return jsonify({
         'emails': grouped,
         'next_page_token': next_page_token,
         'count': len(email_data),
-        'total_fetched': current_count + len(email_data)
+        'total_fetched': total_fetched
     })
 
 # Get email content for preview
@@ -310,6 +484,11 @@ def action():
     list_cache = os.path.join(CACHE_DIR, 'list_cache.pkl')
     if os.path.exists(list_cache):
         os.remove(list_cache)
+
+    # Clear pagination state
+    pagination_file = os.path.join(CACHE_DIR, 'pagination_state.json')
+    if os.path.exists(pagination_file):
+        os.remove(pagination_file)
 
     return redirect('/')
 

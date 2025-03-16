@@ -5,40 +5,298 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentEmailCount = document.querySelectorAll('.email-item').length;
     let isFetching = false;
     let totalUnreadCount = parseInt(document.querySelector('.unread-count').textContent.match(/\d+/)[0] || '0');
+    let isBackgroundFetching = document.body.getAttribute('data-is-loading') === 'true';
+    let lastUpdateTime = Date.now();
+    let updateInterval = null;
+    let initialLoadComplete = false;
+
+    // Set up status checking if background fetching is happening
+    if (isBackgroundFetching) {
+        // Start with a faster check interval for initial load
+        updateInterval = setInterval(checkEmailStatus, 1000);
+
+        // After 5 seconds, slow down the check interval to reduce server load
+        setTimeout(function() {
+            clearInterval(updateInterval);
+            updateInterval = setInterval(checkEmailStatus, 3000);
+        }, 5000);
+    }
+
+    // Function to check email status and update UI
+    function checkEmailStatus() {
+        // Don't check too frequently
+        if (Date.now() - lastUpdateTime < 800) {
+            return;
+        }
+
+        lastUpdateTime = Date.now();
+
+        fetch('/fetch-status')
+            .then(response => response.json())
+            .then(data => {
+                // Update the total count if needed
+                if (data.total > 0 && data.total !== totalUnreadCount) {
+                    totalUnreadCount = data.total;
+                    document.querySelector('.unread-count span').textContent = `${totalUnreadCount} Unread Emails`;
+
+                    const totalCountEl = document.getElementById('total-count');
+                    if (totalCountEl) {
+                        totalCountEl.textContent = totalUnreadCount;
+                    }
+                }
+
+                // Update the fetched count
+                if (data.fetched > currentEmailCount) {
+                    const fetchedCountEl = document.getElementById('fetched-count');
+                    if (fetchedCountEl) {
+                        fetchedCountEl.textContent = data.fetched;
+                    }
+
+                    // Update the email list with new emails
+                    updateEmailList(data.grouped);
+
+                    // Update current count
+                    currentEmailCount = data.fetched;
+
+                    // If this is the first update after initial load, mark it complete
+                    if (!initialLoadComplete && data.fetched > 0) {
+                        initialLoadComplete = true;
+
+                        // Hide any loading indicators
+                        const loadingIndicators = document.querySelectorAll('.loading-indicator');
+                        loadingIndicators.forEach(indicator => {
+                            indicator.style.display = 'none';
+                        });
+                    }
+                }
+
+                // If fetching is complete, stop checking
+                if (data.status === 'complete') {
+                    if (updateInterval) {
+                        clearInterval(updateInterval);
+                        updateInterval = null;
+                    }
+
+                    // Show load more button if there are more emails to fetch
+                    const loadMoreBtn = document.getElementById('load-more-btn');
+                    if (loadMoreBtn) {
+                        if (currentEmailCount < totalUnreadCount) {
+                            loadMoreBtn.style.display = 'block';
+                        } else {
+                            loadMoreBtn.style.display = 'none';
+                        }
+                    }
+
+                    // Hide any loading indicators
+                    const loadingIndicators = document.querySelectorAll('.loading-indicator');
+                    loadingIndicators.forEach(indicator => {
+                        indicator.style.display = 'none';
+                    });
+                }
+
+                // Handle errors
+                if (data.status === 'error') {
+                    console.error('Error fetching emails:', data.error);
+                    if (updateInterval) {
+                        clearInterval(updateInterval);
+                        updateInterval = null;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error checking email status:', error);
+            });
+    }
+
+    // Function to update the email list with new emails
+    function updateEmailList(groupedEmails) {
+        if (!groupedEmails) return;
+
+        const emailListContent = document.querySelector('.email-list-content');
+
+        // Process each domain group
+        for (const domain in groupedEmails) {
+            let domainSection = document.querySelector(`.domain-section[data-domain="${domain}"]`);
+            const emails = groupedEmails[domain];
+
+            // If domain section doesn't exist, create it
+            if (!domainSection) {
+                domainSection = document.createElement('div');
+                domainSection.className = 'domain-section';
+                domainSection.setAttribute('data-domain', domain);
+
+                domainSection.innerHTML = `
+                    <div class="domain-header">
+                        <div class="domain-checkbox">
+                            <input type="checkbox" id="select-domain-${domain}" class="select-domain">
+                            <label for="select-domain-${domain}"></label>
+                        </div>
+                        <h2 class="domain-name">${domain} <span class="email-count">(${emails.length})</span></h2>
+                    </div>
+                    <div class="email-items" id="domain-emails-${domain}"></div>
+                `;
+
+                // Find where to insert the new domain (by email count)
+                const domainSections = Array.from(document.querySelectorAll('.domain-section'));
+                let inserted = false;
+
+                if (domainSections.length > 0) {
+                    for (let i = 0; i < domainSections.length; i++) {
+                        const section = domainSections[i];
+                        const sectionDomain = section.getAttribute('data-domain');
+                        const sectionCount = groupedEmails[sectionDomain] ? groupedEmails[sectionDomain].length : 0;
+
+                        if (emails.length > sectionCount) {
+                            section.parentNode.insertBefore(domainSection, section);
+                            inserted = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!inserted) {
+                    // Insert before the load more container or at the end
+                    const loadMoreContainer = document.querySelector('.load-more-container');
+                    if (loadMoreContainer) {
+                        emailListContent.insertBefore(domainSection, loadMoreContainer);
+                    } else {
+                        emailListContent.appendChild(domainSection);
+                    }
+                }
+
+                // Add event listener for domain checkbox
+                const domainCheckbox = domainSection.querySelector('.select-domain');
+                domainCheckbox.addEventListener('change', function() {
+                    const emailCheckboxes = document.querySelectorAll(`.email-checkbox[data-domain="${domain}"]`);
+                    emailCheckboxes.forEach(cb => {
+                        cb.checked = this.checked;
+                    });
+                });
+            }
+
+            // Get the email items container for this domain
+            const emailItemsContainer = domainSection.querySelector('.email-items');
+            const existingEmailIds = new Set(Array.from(emailItemsContainer.querySelectorAll('.email-item')).map(item => item.dataset.emailId));
+
+            // Update the email count
+            const emailCountElement = domainSection.querySelector('.email-count');
+
+            // Add new emails that don't already exist
+            for (const email of emails) {
+                if (!existingEmailIds.has(email.id)) {
+                    const emailItem = document.createElement('div');
+                    emailItem.className = 'email-item';
+                    emailItem.setAttribute('data-email-id', email.id);
+
+                    emailItem.innerHTML = `
+                        <div class="email-checkbox-container">
+                            <input type="checkbox" id="email-${email.id}" class="email-checkbox" data-domain="${domain}" name="email_ids" value="${email.id}">
+                            <label for="email-${email.id}"></label>
+                        </div>
+                        <div class="email-content">
+                            <div class="email-sender">${email.sender}</div>
+                            <div class="email-subject">${email.subject}</div>
+                            <div class="email-date">${email.date}</div>
+                        </div>
+                    `;
+
+                    emailItemsContainer.appendChild(emailItem);
+
+                    // Add click event for preview
+                    emailItem.addEventListener('click', handleEmailClick);
+
+                    // Add change event for checkbox
+                    const checkbox = emailItem.querySelector('.email-checkbox');
+                    checkbox.addEventListener('change', function() {
+                        updateDomainCheckbox(domain);
+                    });
+
+                    // Add to existing IDs set
+                    existingEmailIds.add(email.id);
+                }
+            }
+
+            // Update the count
+            emailCountElement.textContent = `(${existingEmailIds.size})`;
+        }
+
+        // If there were no emails before, remove the "no emails" message
+        const noEmailsMessage = document.querySelector('.no-emails');
+        if (noEmailsMessage && Object.keys(groupedEmails).length > 0) {
+            noEmailsMessage.remove();
+        }
+
+        // Re-sort domain sections by email count
+        sortDomainSections();
+    }
+
+    // Function to sort domain sections by email count
+    function sortDomainSections() {
+        const emailListContent = document.querySelector('.email-list-content');
+        const domainSections = Array.from(document.querySelectorAll('.domain-section'));
+        const loadMoreContainer = document.querySelector('.load-more-container');
+
+        // Remove all domain sections
+        domainSections.forEach(section => section.remove());
+
+        // Sort by email count
+        domainSections.sort((a, b) => {
+            const aCount = parseInt(a.querySelector('.email-count').textContent.match(/\d+/)[0] || '0');
+            const bCount = parseInt(b.querySelector('.email-count').textContent.match(/\d+/)[0] || '0');
+            return bCount - aCount;
+        });
+
+        // Re-insert in sorted order
+        domainSections.forEach(section => {
+            if (loadMoreContainer) {
+                emailListContent.insertBefore(section, loadMoreContainer);
+            } else {
+                emailListContent.appendChild(section);
+            }
+        });
+    }
 
     // Add load more button if needed
-    const emailList = document.querySelector('.email-list');
+    const emailList = document.querySelector('.email-list-content');
     if (emailList) {
-        const loadMoreContainer = document.createElement('div');
-        loadMoreContainer.className = 'load-more-container';
-        loadMoreContainer.innerHTML = `
-            <button id="load-more-btn" class="load-more-btn">Load More Emails</button>
-            <div class="loading-more" style="display: none;">
-                <div class="spinner"></div>
-                <span>Loading more emails...</span>
-            </div>
-            <div class="fetch-status">
-                <span id="fetched-count">${currentEmailCount}</span> of <span id="total-count">${totalUnreadCount}</span> emails loaded
-            </div>
-        `;
-        emailList.appendChild(loadMoreContainer);
+        // Check if load more container already exists
+        let loadMoreContainer = document.querySelector('.load-more-container');
+
+        if (!loadMoreContainer) {
+            loadMoreContainer = document.createElement('div');
+            loadMoreContainer.className = 'load-more-container';
+            loadMoreContainer.innerHTML = `
+                <button id="load-more-btn" class="load-more-btn">Load More Emails</button>
+                <div class="loading-more" style="display: none;">
+                    <div class="spinner"></div>
+                    <span>Loading more emails...</span>
+                </div>
+                <div class="fetch-status">
+                    <span id="fetched-count">${currentEmailCount}</span> of <span id="total-count">${totalUnreadCount}</span> emails loaded
+                </div>
+            `;
+            emailList.appendChild(loadMoreContainer);
+        }
 
         // Add event listener to load more button
         const loadMoreBtn = document.getElementById('load-more-btn');
         const loadingMore = document.querySelector('.loading-more');
 
-        loadMoreBtn.addEventListener('click', function() {
-            if (isFetching) return;
+        if (loadMoreBtn && !loadMoreBtn.hasEventListener) {
+            loadMoreBtn.hasEventListener = true;
+            loadMoreBtn.addEventListener('click', function() {
+                if (isFetching) return;
 
-            isFetching = true;
-            loadMoreBtn.style.display = 'none';
-            loadingMore.style.display = 'flex';
+                isFetching = true;
+                loadMoreBtn.style.display = 'none';
+                loadingMore.style.display = 'flex';
 
-            fetchMoreEmails();
-        });
+                fetchMoreEmails();
+            });
+        }
 
         // Hide button if we've loaded all emails
-        if (currentEmailCount >= totalUnreadCount) {
+        if (loadMoreBtn && currentEmailCount >= totalUnreadCount) {
             loadMoreBtn.style.display = 'none';
         }
     }
@@ -76,24 +334,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="email-items" id="domain-emails-${domain}"></div>
                         `;
 
-                        // Find where to insert the new domain (alphabetically)
-                        const domainSections = document.querySelectorAll('.domain-section');
-                        let inserted = false;
-
-                        for (const section of domainSections) {
-                            const sectionDomain = section.getAttribute('data-domain');
-                            if (domain < sectionDomain) {
-                                section.parentNode.insertBefore(domainContainer, section);
-                                inserted = true;
-                                break;
-                            }
-                        }
-
-                        if (!inserted) {
-                            // Insert at the end
-                            const loadMoreContainer = document.querySelector('.load-more-container');
-                            emailList.insertBefore(domainContainer, loadMoreContainer);
-                        }
+                        // Insert at the end
+                        const loadMoreContainer = document.querySelector('.load-more-container');
+                        emailList.insertBefore(domainContainer, loadMoreContainer);
 
                         domainSection = domainContainer;
                     }
@@ -126,61 +369,15 @@ document.addEventListener('DOMContentLoaded', function() {
                         emailItemsContainer.appendChild(emailItem);
 
                         // Add click event for preview
-                        emailItem.addEventListener('click', function() {
-                            const emailId = this.dataset.emailId;
-
-                            // Remove active class from previously active item
-                            if (activeEmailItem) {
-                                activeEmailItem.classList.remove('active');
-                            }
-
-                            // Add active class to clicked item
-                            this.classList.add('active');
-                            activeEmailItem = this;
-
-                            // Show loading spinner
-                            previewEmpty.style.display = 'none';
-                            previewContent.style.display = 'none';
-                            loading.style.display = 'flex';
-
-                            // On mobile, show the preview container
-                            if (window.innerWidth <= 768) {
-                                previewContainer.classList.add('active');
-                            }
-
-                            // Fetch email content
-                            fetch(`/email/${emailId}`)
-                                .then(response => response.json())
-                                .then(data => {
-                                    // Hide loading spinner
-                                    loading.style.display = 'none';
-
-                                    // Update preview content
-                                    previewSubject.textContent = data.subject;
-                                    previewSender.textContent = data.sender;
-                                    previewDate.textContent = data.date;
-                                    previewTo.textContent = `To: ${data.to}`;
-                                    previewBody.innerHTML = data.body;
-
-                                    // Show preview content
-                                    previewContent.style.display = 'flex';
-                                })
-                                .catch(error => {
-                                    console.error('Error fetching email:', error);
-                                    loading.style.display = 'none';
-                                    previewEmpty.style.display = 'flex';
-                                    previewEmpty.innerHTML = `
-                                        <i class="fas fa-exclamation-circle" style="color: var(--danger);"></i>
-                                        <h2>Error Loading Email</h2>
-                                        <p>There was a problem loading the email content.</p>
-                                    `;
-                                });
-                        });
+                        emailItem.addEventListener('click', handleEmailClick);
                     }
                 }
 
                 // Add event listeners to new checkboxes
                 setupCheckboxes();
+
+                // Re-sort domain sections by email count
+                sortDomainSections();
 
                 // Update UI
                 const loadMoreBtn = document.getElementById('load-more-btn');
@@ -206,6 +403,58 @@ document.addEventListener('DOMContentLoaded', function() {
                 loadMoreBtn.style.display = 'block';
                 loadMoreBtn.textContent = 'Error loading emails. Try again';
                 isFetching = false;
+            });
+    }
+
+    // Function to handle email click
+    function handleEmailClick() {
+        const emailId = this.dataset.emailId;
+
+        // Remove active class from previously active item
+        if (activeEmailItem) {
+            activeEmailItem.classList.remove('active');
+        }
+
+        // Add active class to clicked item
+        this.classList.add('active');
+        activeEmailItem = this;
+
+        // Show loading spinner
+        previewEmpty.style.display = 'none';
+        previewContent.style.display = 'none';
+        loading.style.display = 'flex';
+
+        // On mobile, show the preview container
+        if (window.innerWidth <= 768) {
+            previewContainer.classList.add('active');
+        }
+
+        // Fetch email content
+        fetch(`/email/${emailId}`)
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading spinner
+                loading.style.display = 'none';
+
+                // Update preview content
+                previewSubject.textContent = data.subject;
+                previewSender.textContent = data.sender;
+                previewDate.textContent = data.date;
+                previewTo.textContent = `To: ${data.to}`;
+                previewBody.innerHTML = data.body;
+
+                // Show preview content
+                previewContent.style.display = 'flex';
+            })
+            .catch(error => {
+                console.error('Error fetching email:', error);
+                loading.style.display = 'none';
+                previewEmpty.style.display = 'flex';
+                previewEmpty.innerHTML = `
+                    <i class="fas fa-exclamation-circle" style="color: var(--danger);"></i>
+                    <h2>Error Loading Email</h2>
+                    <p>There was a problem loading the email content.</p>
+                `;
             });
     }
 
@@ -243,28 +492,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initial setup of checkboxes
     setupCheckboxes();
 
-    // Domain select all functionality
-    const domainCheckboxes = document.querySelectorAll('.select-domain');
-    domainCheckboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', function() {
-            const domainId = this.id.split('-').pop();
-            const emailCheckboxes = document.querySelectorAll(`.email-checkbox[data-domain="${domainId}"]`);
-
-            emailCheckboxes.forEach(cb => {
-                cb.checked = this.checked;
-            });
-        });
-    });
-
-    // Individual email checkbox functionality
-    const emailCheckboxes = document.querySelectorAll('.email-checkbox');
-    emailCheckboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', function() {
-            const domainId = this.dataset.domain;
-            updateDomainCheckbox(domainId);
-        });
-    });
-
     // Function to update domain checkbox state
     function updateDomainCheckbox(domainId) {
         const domainCheckbox = document.getElementById(`select-domain-${domainId}`);
@@ -301,57 +528,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let activeEmailItem = null;
 
+    // Add click event to existing email items
     emailItems.forEach(item => {
-        item.addEventListener('click', function() {
-            const emailId = this.dataset.emailId;
-
-            // Remove active class from previously active item
-            if (activeEmailItem) {
-                activeEmailItem.classList.remove('active');
-            }
-
-            // Add active class to clicked item
-            this.classList.add('active');
-            activeEmailItem = this;
-
-            // Show loading spinner
-            previewEmpty.style.display = 'none';
-            previewContent.style.display = 'none';
-            loading.style.display = 'flex';
-
-            // On mobile, show the preview container
-            if (window.innerWidth <= 768) {
-                previewContainer.classList.add('active');
-            }
-
-            // Fetch email content
-            fetch(`/email/${emailId}`)
-                .then(response => response.json())
-                .then(data => {
-                    // Hide loading spinner
-                    loading.style.display = 'none';
-
-                    // Update preview content
-                    previewSubject.textContent = data.subject;
-                    previewSender.textContent = data.sender;
-                    previewDate.textContent = data.date;
-                    previewTo.textContent = `To: ${data.to}`;
-                    previewBody.innerHTML = data.body;
-
-                    // Show preview content
-                    previewContent.style.display = 'flex';
-                })
-                .catch(error => {
-                    console.error('Error fetching email:', error);
-                    loading.style.display = 'none';
-                    previewEmpty.style.display = 'flex';
-                    previewEmpty.innerHTML = `
-                        <i class="fas fa-exclamation-circle" style="color: var(--danger);"></i>
-                        <h2>Error Loading Email</h2>
-                        <p>There was a problem loading the email content.</p>
-                    `;
-                });
-        });
+        item.addEventListener('click', handleEmailClick);
     });
 
     // Add close button for mobile view
@@ -372,4 +551,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         previewContainer.appendChild(closeButton);
     }
+
+    // Initial sort of domain sections
+    sortDomainSections();
 });

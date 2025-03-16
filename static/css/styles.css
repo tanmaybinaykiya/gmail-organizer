@@ -28,8 +28,8 @@ body {
 
 .app-container {
     display: flex;
-    height: calc(100vh - 64px);
-    margin-top: 64px;
+    height: calc(100vh - 50px);
+    margin-top: 50px;
 }
 
 .email-list-container {
@@ -41,7 +41,7 @@ body {
 }
 
 .email-list-content {
-    padding-top: 80px;
+    padding-top: 70px;
 }
 
 .email-preview-container {
@@ -52,10 +52,10 @@ body {
     display: flex;
     flex-direction: column;
     position: fixed;
-    top: 64px;
+    top: 50px;
     right: 0;
     width: 45%;
-    height: calc(100vh - 64px);
+    height: calc(100vh - 50px);
     z-index: 80;
 }
 
@@ -83,40 +83,41 @@ body {
 }
 
 .email-preview-header {
-    padding: 15px;
+    padding: 12px;
     border-bottom: 1px solid var(--border);
 }
 
 .email-preview-subject {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 500;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 .email-preview-meta {
     display: flex;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
 .email-preview-sender {
     font-weight: 500;
+    font-size: 14px;
 }
 
 .email-preview-date {
     margin-left: auto;
     color: var(--gray);
-    font-size: 14px;
+    font-size: 13px;
 }
 
 .email-preview-to {
     color: var(--gray);
-    font-size: 14px;
-    margin-bottom: 10px;
+    font-size: 13px;
+    margin-bottom: 8px;
 }
 
 .email-preview-body {
-    padding: 15px;
+    padding: 12px;
     flex: 1;
     overflow-y: auto;
 }
@@ -129,13 +130,13 @@ body {
 header {
     background-color: white;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    padding: 15px 0;
+    padding: 10px 0;
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     z-index: 100;
-    height: 64px;
+    height: 50px;
 }
 
 .header-content {
@@ -150,14 +151,14 @@ header {
 .logo {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 24px;
+    gap: 8px;
+    font-size: 18px;
     font-weight: 500;
     color: var(--primary);
 }
 
 .logo i {
-    font-size: 28px;
+    font-size: 22px;
 }
 
 .header-actions {
@@ -203,9 +204,9 @@ header {
 }
 
 h1 {
-    font-size: 24px;
+    font-size: 20px;
     font-weight: 400;
-    margin: 10px 0 15px;
+    margin: 5px 0 12px;
     color: var(--dark);
 }
 
@@ -255,7 +256,7 @@ h1 {
 }
 
 .email-item {
-    padding: 6px 12px;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -282,8 +283,8 @@ h1 {
 .custom-checkbox {
     appearance: none;
     -webkit-appearance: none;
-    height: 16px;
-    width: 16px;
+    height: 14px;
+    width: 14px;
     background-color: white;
     border: 2px solid var(--gray);
     border-radius: 3px;
@@ -422,7 +423,7 @@ button:hover {
     .email-preview-container {
         display: none;
         position: fixed;
-        top: 64px;
+        top: 50px;
         left: 0;
         right: 0;
         bottom: 0;
@@ -452,13 +453,13 @@ button:hover {
     background-color: white;
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    margin-bottom: 20px;
-    padding: 15px;
+    margin-bottom: 15px;
+    padding: 10px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     position: fixed;
-    top: 64px;
+    top: 50px;
     left: 15px;
     width: calc(55% - 30px);
     z-index: 90;
@@ -468,11 +469,11 @@ button:hover {
 .action-controls-container {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 10px;
 }
 
 .action-label {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--dark);
     font-weight: 500;
 }
@@ -480,7 +481,7 @@ button:hover {
 .action-controls {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
 }
 
 .domain-actions {
@@ -525,9 +526,9 @@ button:hover {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 20px;
-    margin-top: 20px;
-    margin-bottom: 40px;
+    padding: 15px;
+    margin-top: 10px;
+    margin-bottom: 30px;
 }
 
 .load-more-btn {
@@ -572,35 +573,36 @@ button:hover {
     text-align: center;
 }
 
-/* Domain section styles */
+/* Domain section styles - more condensed */
 .domain-section {
     background-color: white;
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     overflow: hidden;
 }
 
 .domain-section .domain-header {
     display: flex;
     align-items: center;
-    padding: 12px 15px;
+    padding: 8px 12px;
     background-color: var(--primary-light);
     border-bottom: 1px solid var(--border);
 }
 
 .domain-section .domain-checkbox {
-    margin-right: 10px;
+    margin-right: 8px;
 }
 
 .domain-section .domain-name {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 500;
     color: var(--primary);
+    margin: 0;
 }
 
 .domain-section .email-count {
-    font-size: 14px;
+    font-size: 12px;
     font-weight: normal;
     color: var(--gray);
     margin-left: 5px;
@@ -610,10 +612,10 @@ button:hover {
     padding: 0;
 }
 
-/* Email item styles */
+/* Email item styles - more condensed */
 .email-item {
     display: flex;
-    padding: 12px 15px;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background-color 0.2s;
@@ -628,27 +630,89 @@ button:hover {
 }
 
 .email-checkbox-container {
-    margin-right: 10px;
+    margin-right: 8px;
+    display: flex;
+    align-items: flex-start;
+    padding-top: 2px;
 }
 
 .email-content {
     flex: 1;
+    min-width: 0;
 }
 
 .email-sender {
     font-weight: 500;
-    margin-bottom: 5px;
+    margin-bottom: 2px;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .email-subject {
     color: var(--dark);
-    margin-bottom: 5px;
+    margin-bottom: 2px;
+    font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .email-date {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--gray);
+}
+
+/* Loading indicator for progressive loading */
+.loading-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    margin: 20px 0;
+    text-align: center;
+}
+
+.loading-indicator .spinner {
+    border: 4px solid rgba(0, 0, 0, 0.1);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border-left-color: var(--primary);
+    animation: spin 1s linear infinite;
+    margin-bottom: 10px;
+}
+
+.loading-indicator p {
+    color: var(--gray);
+    font-size: 14px;
+}
+
+select {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: white;
+    font-size: 12px;
+    color: var(--dark);
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+button {
+    padding: 4px 10px;
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }

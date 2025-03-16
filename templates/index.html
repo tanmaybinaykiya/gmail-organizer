@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
-<body>
+<body data-is-loading="{{ is_loading|default(false)|string|lower }}">
     <header>
         <div class="header-content">
             <div class="logo">
@@ -85,6 +85,13 @@
                             <i class="fas fa-check-circle"></i>
                             <h2>No unread emails!</h2>
                             <p>Your inbox is all caught up.</p>
+                        </div>
+                    {% endif %}
+
+                    {% if is_loading %}
+                    <div class="loading-indicator">
+                        <div class="spinner"></div>
+                        <p>Loading more emails...</p>
                         </div>
                     {% endif %}
                 </div>
