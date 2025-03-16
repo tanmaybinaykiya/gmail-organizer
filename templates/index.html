@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gmail Organizer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <i class="fas fa-envelope"></i>
+                <span>Gmail Organizer</span>
+            </div>
+            <div class="header-actions">
+                <a href="/clear-cache" class="refresh-button">
+                    <i class="fas fa-sync-alt"></i>
+                    Refresh Data
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <div class="email-list-container">
+            <form action="/action" method="post" id="email-action-form">
+                <div class="global-actions">
+                    <div class="action-controls-container">
+                        <div class="action-label">Action for selected emails:</div>
+                        <div class="action-controls">
+                            <select name="action_type" id="global-action-type">
+                                <option value="read">Mark as Read</option>
+                                <option value="delete" selected>Delete</option>
+                                <option value="archive">Archive</option>
+                            </select>
+
+                            <button type="submit">
+                                <i class="fas fa-check"></i>
+                                Apply
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="email-list-content">
+
+                    {% for domain, emails in grouped.items() %}
+                    {% set domain_index = loop.index %}
+                    <div class="domain-group">
+                        <div class="domain-header">
+                            <h2>
+                                <i class="fas fa-globe"></i>
+                                {{ domain }}
+                                <span class="count">{{ emails|length }}</span>
+                            </h2>
+                            <div class="domain-actions">
+                                <input type="checkbox" id="select-domain-{{ domain_index }}" class="custom-checkbox select-domain">
+                                <label for="select-domain-{{ domain_index }}">Select All</label>
+                            </div>
+                        </div>
+
+                        <div class="email-list">
+                            {% for email in emails %}
+                            <div class="email-item" data-email-id="{{ email.id }}">
+                                <div class="checkbox-container" onclick="event.stopPropagation();">
+                                    <input type="checkbox" name="email_ids" value="{{ email.id }}" class="custom-checkbox email-checkbox" data-domain="{{ domain_index }}">
+                                </div>
+                                <div class="email-content">
+                                    <div class="sender">{{ email.sender }}</div>
+                                    <div class="email-subject">{{ email.subject }}</div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </form>
+        </div>
+
+        <div class="email-preview-container">
+            <div class="email-preview-empty">
+                <i class="fas fa-envelope-open"></i>
+                <h2>No Email Selected</h2>
+                <p>Click on an email to view its contents</p>
+            </div>
+
+            <div class="email-preview-content">
+                <div class="email-preview-header">
+                    <div class="email-preview-subject"></div>
+                    <div class="email-preview-meta">
+                        <div class="email-preview-sender"></div>
+                        <div class="email-preview-date"></div>
+                    </div>
+                    <div class="email-preview-to"></div>
+                </div>
+                <div class="email-preview-body"></div>
+            </div>
+
+            <div class="loading" style="display: none;">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
