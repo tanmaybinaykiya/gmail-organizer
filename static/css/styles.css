@@ -42,7 +42,7 @@ body {
 }
 
 .email-list-content {
-    padding-top: 70px;
+    padding-top: 140px;
 }
 
 .email-preview-container {
@@ -721,6 +721,11 @@ button {
     display: flex;
     flex-direction: column;
     gap: 15px;
+    position: fixed;
+    top: 85px;
+    left: 15px;
+    width: calc(55% - 30px);
+    z-index: 89;
 }
 
 .fetch-status-display {
