@@ -39,10 +39,13 @@ body {
     padding: 15px;
     padding-top: 0;
     position: relative;
+    height: 100%;
 }
 
 .email-list-content {
-    padding-top: 140px;
+    padding-top: 160px;
+    padding-bottom: 20px;
+    min-height: 100%;
 }
 
 .email-preview-container {
@@ -583,6 +586,7 @@ button:hover {
     padding: 8px 12px;
     background-color: var(--primary-light);
     border-bottom: 1px solid var(--border);
+    cursor: pointer;
 }
 
 .domain-section .domain-checkbox {
@@ -594,6 +598,20 @@ button:hover {
     font-weight: 500;
     color: var(--primary);
     margin: 0;
+    display: flex;
+    align-items: center;
+}
+
+.domain-section .domain-name::after {
+    content: '\f107';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+    margin-left: 8px;
+    transition: transform 0.2s ease;
+}
+
+.domain-section.collapsed .domain-name::after {
+    transform: rotate(-90deg);
 }
 
 .domain-section .email-count {
@@ -605,6 +623,14 @@ button:hover {
 
 .domain-section .email-items {
     padding: 0;
+    max-height: 1000px;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.domain-section.collapsed .email-items {
+    max-height: 0;
+    border-bottom: none;
 }
 
 /* Email item styles - more condensed */

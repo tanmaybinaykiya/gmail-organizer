@@ -11,6 +11,50 @@ document.addEventListener('DOMContentLoaded', function() {
     let initialLoadComplete = false;
     let isPaused = false;
 
+    // Setup collapsible domain sections
+    function setupCollapsibleDomains() {
+        const domainHeaders = document.querySelectorAll('.domain-header');
+
+        domainHeaders.forEach(header => {
+            if (!header.hasEventListener) {
+                header.hasEventListener = true;
+                header.addEventListener('click', function(e) {
+                    // Don't collapse if clicking on checkbox
+                    if (e.target.closest('.domain-checkbox')) {
+                        return;
+                    }
+
+                    const domainSection = this.closest('.domain-section');
+                    domainSection.classList.toggle('collapsed');
+
+                    // Store collapsed state in localStorage
+                    const domain = domainSection.getAttribute('data-domain');
+                    const collapsedDomains = JSON.parse(localStorage.getItem('collapsedDomains') || '{}');
+
+                    if (domainSection.classList.contains('collapsed')) {
+                        collapsedDomains[domain] = true;
+                    } else {
+                        delete collapsedDomains[domain];
+                    }
+
+                    localStorage.setItem('collapsedDomains', JSON.stringify(collapsedDomains));
+                });
+            }
+        });
+
+        // Apply saved collapsed states
+        const collapsedDomains = JSON.parse(localStorage.getItem('collapsedDomains') || '{}');
+        for (const domain in collapsedDomains) {
+            const domainSection = document.querySelector(`.domain-section[data-domain="${domain}"]`);
+            if (domainSection) {
+                domainSection.classList.add('collapsed');
+            }
+        }
+    }
+
+    // Call setup on initial load
+    setupCollapsibleDomains();
+
     // Fetch control elements
     const pauseBtn = document.getElementById('pause-fetch-btn');
     const resumeBtn = document.getElementById('resume-fetch-btn');
@@ -65,6 +109,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     // Update the email list with new emails
                     updateEmailList(data.grouped);
+
+                    // Setup collapsible functionality for new domains
+                    setupCollapsibleDomains();
 
                     // Update current count
                     currentEmailCount = data.fetched;
@@ -360,6 +407,34 @@ document.addEventListener('DOMContentLoaded', function() {
                         cb.checked = this.checked;
                     });
                 });
+
+                // Add collapsible functionality to new domain
+                const domainHeader = domainSection.querySelector('.domain-header');
+                domainHeader.addEventListener('click', function(e) {
+                    // Don't collapse if clicking on checkbox
+                    if (e.target.closest('.domain-checkbox')) {
+                        return;
+                    }
+
+                    domainSection.classList.toggle('collapsed');
+
+                    // Store collapsed state in localStorage
+                    const collapsedDomains = JSON.parse(localStorage.getItem('collapsedDomains') || '{}');
+
+                    if (domainSection.classList.contains('collapsed')) {
+                        collapsedDomains[domain] = true;
+                    } else {
+                        delete collapsedDomains[domain];
+                    }
+
+                    localStorage.setItem('collapsedDomains', JSON.stringify(collapsedDomains));
+                });
+
+                // Apply saved collapsed state
+                const collapsedDomains = JSON.parse(localStorage.getItem('collapsedDomains') || '{}');
+                if (collapsedDomains[domain]) {
+                    domainSection.classList.add('collapsed');
+                }
             }
 
             // Get the email items container for this domain
