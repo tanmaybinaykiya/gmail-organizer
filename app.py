@@ -114,7 +114,7 @@ def index():
 
     df = pd.DataFrame(email_data)
     # Group by domain instead of category
-    grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records')).to_dict()
+    grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
 
     # Sort the grouped data by number of emails in each domain
     sorted_grouped = dict(sorted(grouped.items(),
