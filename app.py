@@ -170,7 +170,7 @@ def fetch_email_batch(page_token=None):
 
     # We won't rely on the API's resultSizeEstimate as it seems inaccurate
     # Instead, we'll count the actual emails we fetch
-    logger.info("Fetching batch of emails with page token: {page_token}")
+    logger.info(f"Fetching batch of emails with page token: {page_token}")
     results = service.users().messages().list(
         userId='me',
         q='is:unread',
@@ -644,7 +644,7 @@ def action():
                 logger.info(f"Successfully marked email {email_id} as read. Result: {result}")
 
             elif action_type == 'delete':
-                logger.info(f"Deleting email {email_id}")
+                logger.info(f"Moving email {email_id} to trash")
                 # First get the email details for logging purposes
                 try:
                     email_details = service.users().messages().get(
@@ -657,15 +657,15 @@ def action():
                     headers = email_details.get('payload', {}).get('headers', [])
                     subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
                     sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
-                    logger.info(f"About to delete email - ID: {email_id}, Subject: {subject}, From: {sender}")
+                    logger.info(f"About to move email to trash - ID: {email_id}, Subject: {subject}, From: {sender}")
                 except Exception as e:
-                    logger.warning(f"Could not fetch email details before deletion: {e}")
+                    logger.warning(f"Could not fetch email details before moving to trash: {e}")
 
-                # Now delete the email
-                result = service.users().messages().delete(userId='me', id=email_id).execute()
-                logger.info(f"Successfully deleted email {email_id}. Result: {result}")
+                # Move the email to trash instead of permanently deleting it
+                result = service.users().messages().trash(userId='me', id=email_id).execute()
+                logger.info(f"Successfully moved email {email_id} to trash. Result: {result}")
 
-                # Remove from cache if deleted
+                # Remove from cache if moved to trash
                 cache_file = os.path.join(CACHE_DIR, f'email_{email_id}.pkl')
                 if os.path.exists(cache_file):
                     os.remove(cache_file)
