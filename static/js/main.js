@@ -528,13 +528,36 @@ document.addEventListener('DOMContentLoaded', function() {
                         document.getElementById('modal-last-update').textContent = 'N/A';
                     }
 
-                    document.getElementById('modal-error').textContent = data.error || 'None';
+                    // Handle error display with better error handling
+                    const errorElement = document.getElementById('modal-error');
+                    if (data.error) {
+                        errorElement.textContent = data.error;
+                        errorElement.style.color = 'var(--danger)';
+                    } else {
+                        errorElement.textContent = 'None';
+                        errorElement.style.color = 'var(--gray)';
+                    }
+
+                    // Add domain count information if available
+                    const domainInfoElement = document.getElementById('modal-domain-info');
+                    if (domainInfoElement) {
+                        if (data.domain_count !== undefined) {
+                            domainInfoElement.textContent = data.domain_count;
+                        } else {
+                            domainInfoElement.textContent = 'N/A';
+                        }
+                    }
 
                     // Show the modal
                     logsModal.style.display = 'block';
                 })
                 .catch(error => {
                     console.error('Error fetching logs:', error);
+                    // Show error in modal
+                    document.getElementById('modal-status').textContent = 'Error';
+                    document.getElementById('modal-error').textContent = 'Failed to fetch logs: ' + error.message;
+                    document.getElementById('modal-error').style.color = 'var(--danger)';
+                    logsModal.style.display = 'block';
                 });
         });
     }

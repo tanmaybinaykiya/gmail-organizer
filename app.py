@@ -818,13 +818,27 @@ def fetch_logs():
     status = 'paused' if fetch_status['is_paused'] else ('fetching' if fetch_status['is_fetching'] else 'complete')
     last_fetch_time_str = fetch_status['last_fetch_time'].strftime('%Y-%m-%d %H:%M:%S') if fetch_status['last_fetch_time'] else None
 
+    # Check if there are any domain-related errors
+    error_message = fetch_status['error']
+
+    # Create a safe copy of the logs data
     logs = {
         'status': status,
         'fetched': fetch_status['fetched_emails'],
         'total': fetch_status['total_emails'],
         'last_fetch_time': last_fetch_time_str,
-        'error': fetch_status['error']
+        'error': error_message
     }
+
+    try:
+        # Add domain count information if available
+        if fetch_status['grouped_emails']:
+            logs['domain_count'] = len(fetch_status['grouped_emails'])
+    except (KeyError, TypeError) as e:
+        # If there's an error accessing the domain information, log it
+        logger.error(f"Error accessing domain information: {e}", exc_info=True)
+        if not error_message:
+            logs['error'] = f"Error accessing domain information: {e}"
 
     logger.info(f"Fetch logs requested: {logs}")
     return jsonify(logs)
