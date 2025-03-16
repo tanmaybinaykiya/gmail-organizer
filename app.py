@@ -632,6 +632,9 @@ def action():
 
     logger.info(f"Performing {action_type} action on {len(email_ids)} emails")
 
+    # Track which emails were successfully processed
+    processed_emails = []
+
     for email_id in email_ids:
         try:
             if action_type == 'read':
@@ -642,6 +645,7 @@ def action():
                     body={'removeLabelIds': ['UNREAD']}
                 ).execute()
                 logger.info(f"Successfully marked email {email_id} as read. Result: {result}")
+                processed_emails.append(email_id)
 
             elif action_type == 'delete':
                 logger.info(f"Moving email {email_id} to trash")
@@ -664,12 +668,13 @@ def action():
                 # Move the email to trash instead of permanently deleting it
                 result = service.users().messages().trash(userId='me', id=email_id).execute()
                 logger.info(f"Successfully moved email {email_id} to trash. Result: {result}")
+                processed_emails.append(email_id)
 
-                # Remove from cache if moved to trash
+                # Remove from email content cache if moved to trash
                 cache_file = os.path.join(CACHE_DIR, f'email_{email_id}.pkl')
                 if os.path.exists(cache_file):
                     os.remove(cache_file)
-                    logger.info(f"Removed email {email_id} from cache")
+                    logger.info(f"Removed email {email_id} from content cache")
 
             elif action_type == 'archive':
                 logger.info(f"Archiving email {email_id}")
@@ -679,14 +684,84 @@ def action():
                     body={'removeLabelIds': ['INBOX']}
                 ).execute()
                 logger.info(f"Successfully archived email {email_id}. Result: {result}")
+                processed_emails.append(email_id)
         except Exception as e:
             logger.error(f"Error performing {action_type} action on email {email_id}: {e}", exc_info=True)
 
-    # Clear the list cache since the email list has changed
-    list_cache = os.path.join(CACHE_DIR, 'list_cache.pkl')
-    if os.path.exists(list_cache):
-        os.remove(list_cache)
-        logger.info("Cleared list cache after performing actions")
+    # Update the list cache to reflect the changes instead of just clearing it
+    if processed_emails:
+        # Load the current cache
+        cached_data = load_from_cache('list')
+        if cached_data and isinstance(cached_data, dict) and 'grouped' in cached_data:
+            updated = False
+            # Remove processed emails from each domain group
+            for domain, emails in cached_data['grouped'].items():
+                # Filter out the processed emails
+                original_length = len(emails)
+                emails_filtered = [email for email in emails if email['id'] not in processed_emails]
+                if len(emails_filtered) < original_length:
+                    cached_data['grouped'][domain] = emails_filtered
+                    updated = True
+
+            # Remove empty domains
+            domains_to_remove = []
+            for domain, emails in cached_data['grouped'].items():
+                if not emails:
+                    domains_to_remove.append(domain)
+
+            for domain in domains_to_remove:
+                del cached_data['grouped'][domain]
+                updated = True
+
+            if updated:
+                # Update the total count
+                total_emails = sum(len(emails) for emails in cached_data['grouped'].values())
+                cached_data['total_unread'] = total_emails
+
+                # Save the updated cache
+                save_to_cache(cached_data, 'list')
+                logger.info(f"Updated list cache after {action_type} action on {len(processed_emails)} emails")
+
+                # Update fetch status if it's being used
+                global fetch_status
+                if fetch_status['grouped_emails']:
+                    # Update the grouped emails in fetch status
+                    for domain, emails in fetch_status['grouped_emails'].items():
+                        fetch_status['grouped_emails'][domain] = [
+                            email for email in emails if email['id'] not in processed_emails
+                        ]
+
+                    # Remove empty domains
+                    domains_to_remove = []
+                    for domain, emails in fetch_status['grouped_emails'].items():
+                        if not emails:
+                            domains_to_remove.append(domain)
+
+                    for domain in domains_to_remove:
+                        del fetch_status['grouped_emails'][domain]
+
+                    # Update the total and fetched counts
+                    fetch_status['fetched_emails'] -= len(processed_emails)
+                    if fetch_status['fetched_emails'] < 0:
+                        fetch_status['fetched_emails'] = 0
+
+                    fetch_status['total_emails'] -= len(processed_emails)
+                    if fetch_status['total_emails'] < 0:
+                        fetch_status['total_emails'] = 0
+
+                    logger.info(f"Updated fetch status after {action_type} action. New counts: fetched={fetch_status['fetched_emails']}, total={fetch_status['total_emails']}")
+            else:
+                # If no updates were made, just clear the cache
+                list_cache = os.path.join(CACHE_DIR, 'list_cache.pkl')
+                if os.path.exists(list_cache):
+                    os.remove(list_cache)
+                    logger.info("Cleared list cache after performing actions (no updates made)")
+        else:
+            # If cache doesn't exist or is invalid, just clear it
+            list_cache = os.path.join(CACHE_DIR, 'list_cache.pkl')
+            if os.path.exists(list_cache):
+                os.remove(list_cache)
+                logger.info("Cleared list cache after performing actions (invalid cache)")
 
     # Clear pagination state
     pagination_file = os.path.join(CACHE_DIR, 'pagination_state.json')
