@@ -49,9 +49,39 @@
                     </div>
                 </div>
 
-                <div class="email-list-content">
-                    <h1>Your Email Dashboard</h1>
+                <!-- Fetch Control Section -->
+                <div class="fetch-control-section">
+                    <div class="fetch-status-display">
+                        <div class="fetch-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: {% if total_unread > 0 %}{{ (fetched_emails|default(0) / total_unread * 100)|round }}{% else %}0{% endif %}%"></div>
+                            </div>
+                            <div class="progress-text">
+                                <span id="fetched-count">{{ fetched_emails|default(0) }}</span> of
+                                <span id="total-count">{{ total_unread }}</span> emails loaded
+                            </div>
+                        </div>
+                        <div class="fetch-status">
+                            Status: <span id="fetch-status-text">{{ 'Fetching' if is_loading else 'Complete' }}</span>
+                        </div>
+                        <div class="fetch-time">
+                            Last update: <span id="last-fetch-time">Just now</span>
+                        </div>
+                    </div>
+                    <div class="fetch-controls">
+                        <button type="button" id="pause-fetch-btn" class="control-btn pause-btn" {{ 'disabled' if not is_loading }}>
+                            <i class="fas fa-pause"></i> Pause
+                        </button>
+                        <button type="button" id="resume-fetch-btn" class="control-btn resume-btn" disabled>
+                            <i class="fas fa-play"></i> Resume
+                        </button>
+                        <button type="button" id="show-logs-btn" class="control-btn logs-btn">
+                            <i class="fas fa-list"></i> Show Logs
+                        </button>
+                    </div>
+                </div>
 
+                <div class="email-list-content">
                     {% if grouped %}
                         {% for domain, emails in grouped.items() %}
                         <div class="domain-section" data-domain="{{ domain }}">
@@ -119,6 +149,28 @@
 
             <div class="loading" style="display: none;">
                 <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Modal -->
+    <div id="logs-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Email Fetch Logs</h2>
+                <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="logs-container">
+                    <div class="log-entry">
+                        <div class="log-time">Status: <span id="modal-status">-</span></div>
+                        <div class="log-message">Fetched: <span id="modal-fetched">0</span> of <span id="modal-total">0</span> emails</div>
+                    </div>
+                    <div class="log-entry">
+                        <div class="log-time">Last Update: <span id="modal-last-update">-</span></div>
+                        <div class="log-message">Error: <span id="modal-error">None</span></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

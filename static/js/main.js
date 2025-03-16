@@ -9,6 +9,17 @@ document.addEventListener('DOMContentLoaded', function() {
     let lastUpdateTime = Date.now();
     let updateInterval = null;
     let initialLoadComplete = false;
+    let isPaused = false;
+
+    // Fetch control elements
+    const pauseBtn = document.getElementById('pause-fetch-btn');
+    const resumeBtn = document.getElementById('resume-fetch-btn');
+    const showLogsBtn = document.getElementById('show-logs-btn');
+    const logsModal = document.getElementById('logs-modal');
+    const closeModal = document.querySelector('.close-modal');
+    const fetchStatusText = document.getElementById('fetch-status-text');
+    const lastFetchTime = document.getElementById('last-fetch-time');
+    const progressFill = document.querySelector('.progress-fill');
 
     // Set up status checking if background fetching is happening
     if (isBackgroundFetching) {
@@ -58,6 +69,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Update current count
                     currentEmailCount = data.fetched;
 
+                    // Update progress bar
+                    if (totalUnreadCount > 0) {
+                        const progressPercent = (currentEmailCount / totalUnreadCount) * 100;
+                        progressFill.style.width = `${progressPercent}%`;
+                    }
+
                     // If this is the first update after initial load, mark it complete
                     if (!initialLoadComplete && data.fetched > 0) {
                         initialLoadComplete = true;
@@ -70,11 +87,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
 
-                // If fetching is complete, stop checking
-                if (data.status === 'complete') {
+                // Update fetch status text and button states
+                updateFetchStatusUI(data.status);
+
+                // Update last fetch time if available
+                if (data.last_fetch_time) {
+                    lastFetchTime.textContent = formatTimeAgo(new Date(data.last_fetch_time));
+                }
+
+                // If fetching is complete or paused, stop checking frequently
+                if (data.status === 'complete' || data.status === 'paused') {
                     if (updateInterval) {
                         clearInterval(updateInterval);
-                        updateInterval = null;
+                        // Set a slower interval for occasional updates
+                        updateInterval = setInterval(checkEmailStatus, 10000);
                     }
 
                     // Show load more button if there are more emails to fetch
@@ -107,6 +133,148 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Error checking email status:', error);
             });
     }
+
+    // Function to update the fetch status UI
+    function updateFetchStatusUI(status) {
+        // Remove all status classes
+        fetchStatusText.classList.remove('fetching', 'paused', 'complete', 'error');
+
+        // Update text and add appropriate class
+        if (status === 'fetching') {
+            fetchStatusText.textContent = 'Fetching';
+            fetchStatusText.classList.add('fetching');
+            pauseBtn.disabled = false;
+            resumeBtn.disabled = true;
+            isPaused = false;
+        } else if (status === 'paused') {
+            fetchStatusText.textContent = 'Paused';
+            fetchStatusText.classList.add('paused');
+            pauseBtn.disabled = true;
+            resumeBtn.disabled = false;
+            isPaused = true;
+        } else if (status === 'complete') {
+            fetchStatusText.textContent = 'Complete';
+            fetchStatusText.classList.add('complete');
+            pauseBtn.disabled = true;
+            resumeBtn.disabled = true;
+            isPaused = false;
+        } else if (status === 'error') {
+            fetchStatusText.textContent = 'Error';
+            fetchStatusText.classList.add('error');
+            pauseBtn.disabled = true;
+            resumeBtn.disabled = false;
+            isPaused = true;
+        }
+    }
+
+    // Function to format time ago
+    function formatTimeAgo(date) {
+        const now = new Date();
+        const diffMs = now - date;
+        const diffSec = Math.floor(diffMs / 1000);
+        const diffMin = Math.floor(diffSec / 60);
+        const diffHour = Math.floor(diffMin / 60);
+
+        if (diffSec < 60) {
+            return 'Just now';
+        } else if (diffMin < 60) {
+            return `${diffMin} minute${diffMin > 1 ? 's' : ''} ago`;
+        } else if (diffHour < 24) {
+            return `${diffHour} hour${diffHour > 1 ? 's' : ''} ago`;
+        } else {
+            return date.toLocaleString();
+        }
+    }
+
+    // Event listeners for fetch control buttons
+    if (pauseBtn) {
+        pauseBtn.addEventListener('click', function() {
+            if (!isPaused) {
+                fetch('/pause-fetch', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'paused') {
+                        updateFetchStatusUI('paused');
+                        console.log('Email fetching paused');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error pausing fetch:', error);
+                });
+            }
+        });
+    }
+
+    if (resumeBtn) {
+        resumeBtn.addEventListener('click', function() {
+            if (isPaused) {
+                fetch('/resume-fetch', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'fetching') {
+                        updateFetchStatusUI('fetching');
+                        console.log('Email fetching resumed');
+
+                        // Restart the status checking interval
+                        if (updateInterval) {
+                            clearInterval(updateInterval);
+                        }
+                        updateInterval = setInterval(checkEmailStatus, 2000);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error resuming fetch:', error);
+                });
+            }
+        });
+    }
+
+    // Logs modal functionality
+    if (showLogsBtn) {
+        showLogsBtn.addEventListener('click', function() {
+            // Fetch the latest logs
+            fetch('/fetch-logs')
+                .then(response => response.json())
+                .then(data => {
+                    // Update modal content
+                    document.getElementById('modal-status').textContent = data.status;
+                    document.getElementById('modal-fetched').textContent = data.fetched;
+                    document.getElementById('modal-total').textContent = data.total;
+
+                    if (data.last_fetch_time) {
+                        document.getElementById('modal-last-update').textContent = data.last_fetch_time;
+                    } else {
+                        document.getElementById('modal-last-update').textContent = 'N/A';
+                    }
+
+                    document.getElementById('modal-error').textContent = data.error || 'None';
+
+                    // Show the modal
+                    logsModal.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                });
+        });
+    }
+
+    // Close modal when clicking the X
+    if (closeModal) {
+        closeModal.addEventListener('click', function() {
+            logsModal.style.display = 'none';
+        });
+    }
+
+    // Close modal when clicking outside of it
+    window.addEventListener('click', function(event) {
+        if (event.target === logsModal) {
+            logsModal.style.display = 'none';
+        }
+    });
 
     // Function to update the email list with new emails
     function updateEmailList(groupedEmails) {

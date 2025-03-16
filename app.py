@@ -32,7 +32,9 @@ fetch_status = {
     'fetched_emails': 0,
     'next_page_token': None,
     'grouped_emails': {},
-    'error': None
+    'error': None,
+    'is_paused': False,  # New flag to track if fetching is paused
+    'last_fetch_time': None  # Track when the last fetch occurred
 }
 
 # Authenticate with Google
@@ -171,6 +173,9 @@ def sort_grouped_emails(grouped_emails):
 def fetch_emails_background():
     global fetch_status
     try:
+        # Set last fetch time
+        fetch_status['last_fetch_time'] = datetime.now()
+
         # Load existing emails from cache
         cached_data = load_from_cache('list')
         if cached_data and isinstance(cached_data, dict) and 'grouped' in cached_data:
@@ -194,6 +199,33 @@ def fetch_emails_background():
         next_page_token = fetch_status['next_page_token']
 
         while len(email_data) < MAX_TOTAL_EMAILS:
+            # Check if fetching is paused
+            if fetch_status['is_paused']:
+                # Save current state to cache before pausing
+                if email_data:
+                    df = pd.DataFrame(email_data)
+                    if not df.empty:
+                        grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
+                        sorted_grouped = sort_grouped_emails(grouped)
+                        fetch_status['grouped_emails'] = sorted_grouped
+
+                        # Save to cache
+                        cache_data = {
+                            'grouped': sorted_grouped,
+                            'total_unread': fetch_status['total_emails']
+                        }
+                        save_to_cache(cache_data, 'list')
+
+                        # Save pagination state
+                        save_pagination_state(next_page_token, len(email_data), fetch_status['total_emails'])
+
+                # Set is_fetching to false while paused
+                fetch_status['is_fetching'] = False
+                print("Email fetching paused")
+
+                # Exit the fetch loop
+                break
+
             # Fetch a batch of emails
             new_emails, next_page_token = fetch_email_batch(next_page_token)
 
@@ -206,6 +238,7 @@ def fetch_emails_background():
             # Update fetch status
             fetch_status['fetched_emails'] = len(email_data)
             fetch_status['next_page_token'] = next_page_token
+            fetch_status['last_fetch_time'] = datetime.now()
 
             # Save pagination state
             save_pagination_state(next_page_token, len(email_data), fetch_status['total_emails'])
@@ -236,7 +269,7 @@ def fetch_emails_background():
             time.sleep(0.5)
 
         # Final update to cache
-        if email_data:
+        if email_data and not fetch_status['is_paused']:
             df = pd.DataFrame(email_data)
             if not df.empty:
                 grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
@@ -251,7 +284,10 @@ def fetch_emails_background():
             save_to_cache(cache_data, 'list')
             fetch_status['grouped_emails'] = sorted_grouped
 
-        fetch_status['is_fetching'] = False
+            # Only set is_fetching to False if not paused (if paused, we already set it above)
+            if not fetch_status['is_paused']:
+                fetch_status['is_fetching'] = False
+                print("Email fetching completed")
 
     except Exception as e:
         print(f"Error fetching emails: {e}")
@@ -286,6 +322,7 @@ def index():
         return render_template('index.html',
                               grouped=initial_data,
                               total_unread=total_unread,
+                              fetched_emails=fetch_status['fetched_emails'],
                               is_loading=fetch_status['is_fetching'])
     else:
         # If no cache, fetch first batch synchronously for immediate display
@@ -329,6 +366,7 @@ def index():
     return render_template('index.html',
                           grouped=initial_data or {},
                           total_unread=total_unread,
+                          fetched_emails=fetch_status['fetched_emails'],
                           is_loading=fetch_status['is_fetching'])
 
 # Route to check fetch status and get new emails
@@ -344,11 +382,19 @@ def check_fetch_status():
         })
     else:
         # Return current status and data
+        status = 'paused' if fetch_status['is_paused'] else ('fetching' if fetch_status['is_fetching'] else 'complete')
+
+        # Format last fetch time if available
+        last_fetch_time = None
+        if fetch_status['last_fetch_time']:
+            last_fetch_time = fetch_status['last_fetch_time'].strftime('%Y-%m-%d %H:%M:%S')
+
         return jsonify({
-            'status': 'fetching' if fetch_status['is_fetching'] else 'complete',
+            'status': status,
             'fetched': fetch_status['fetched_emails'],
             'total': fetch_status['total_emails'],
-            'grouped': fetch_status['grouped_emails']
+            'grouped': fetch_status['grouped_emails'],
+            'last_fetch_time': last_fetch_time
         })
 
 # Add a route for incremental fetching
@@ -498,6 +544,59 @@ def clear_cache():
     for file in os.listdir(CACHE_DIR):
         os.remove(os.path.join(CACHE_DIR, file))
     return redirect('/')
+
+# Pause email fetching
+@app.route('/pause-fetch', methods=['POST'])
+def pause_fetch():
+    global fetch_status
+
+    fetch_status['is_paused'] = True
+    print("Pausing email fetch process")
+
+    return jsonify({
+        'status': 'paused',
+        'message': 'Email fetching paused'
+    })
+
+# Resume email fetching
+@app.route('/resume-fetch', methods=['POST'])
+def resume_fetch():
+    global fetch_status
+
+    # Only start a new thread if we're actually paused
+    if fetch_status['is_paused']:
+        fetch_status['is_paused'] = False
+        fetch_status['is_fetching'] = True
+        print("Resuming email fetch process")
+
+        thread = threading.Thread(target=fetch_emails_background)
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            'status': 'fetching',
+            'message': 'Email fetching resumed'
+        })
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'Email fetching was not paused'
+        })
+
+# Add a route for logging
+@app.route('/fetch-logs')
+def fetch_logs():
+    global fetch_status
+
+    logs = {
+        'status': 'paused' if fetch_status['is_paused'] else ('fetching' if fetch_status['is_fetching'] else 'complete'),
+        'fetched': fetch_status['fetched_emails'],
+        'total': fetch_status['total_emails'],
+        'last_fetch_time': fetch_status['last_fetch_time'].strftime('%Y-%m-%d %H:%M:%S') if fetch_status['last_fetch_time'] else None,
+        'error': fetch_status['error']
+    }
+
+    return jsonify(logs)
 
 if __name__ == '__main__':
     app.run(debug=True)
