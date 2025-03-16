@@ -17,6 +17,7 @@ app = Flask(__name__)
 SCOPES = ['https://mail.google.com/']
 CACHE_DIR = 'email_cache'
 CACHE_EXPIRY = 24  # Cache expiry in hours
+MAX_EMAILS = 100  # Maximum number of emails to fetch
 
 # Create cache directory if it doesn't exist
 if not os.path.exists(CACHE_DIR):
@@ -86,14 +87,30 @@ def index():
     cached_data = load_from_cache('list')
     if cached_data:
         # Sort the cached data by number of emails in each domain
-        sorted_data = dict(sorted(cached_data.items(),
+        sorted_data = dict(sorted(cached_data['grouped'].items(),
                                  key=lambda item: len(item[1]),
                                  reverse=True))
-        return render_template('index.html', grouped=sorted_data)
+        return render_template('index.html', grouped=sorted_data, total_unread=cached_data['total_unread'])
 
     # If no valid cache, fetch from Gmail API
     service = get_gmail_service()
-    results = service.users().messages().list(userId='me', maxResults=50).execute()
+
+    # Get total unread count first
+    result = service.users().messages().list(
+        userId='me',
+        q='is:unread',
+        maxResults=1
+    ).execute()
+
+    total_unread = result.get('resultSizeEstimate', 0)
+
+    # Now fetch the actual unread messages
+    results = service.users().messages().list(
+        userId='me',
+        q='is:unread',
+        maxResults=MAX_EMAILS
+    ).execute()
+
     messages = results.get('messages', [])
     email_data = []
 
@@ -113,18 +130,27 @@ def index():
         })
 
     df = pd.DataFrame(email_data)
-    # Group by domain instead of category
-    grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
 
-    # Sort the grouped data by number of emails in each domain
-    sorted_grouped = dict(sorted(grouped.items(),
-                                key=lambda item: len(item[1]),
-                                reverse=True))
+    # If no emails found, create an empty dictionary
+    if df.empty:
+        sorted_grouped = {}
+    else:
+        # Group by domain instead of category
+        grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
 
-    # Save to cache
-    save_to_cache(sorted_grouped, 'list')
+        # Sort the grouped data by number of emails in each domain
+        sorted_grouped = dict(sorted(grouped.items(),
+                                    key=lambda item: len(item[1]),
+                                    reverse=True))
 
-    return render_template('index.html', grouped=sorted_grouped)
+    # Save to cache with total unread count
+    cache_data = {
+        'grouped': sorted_grouped,
+        'total_unread': total_unread
+    }
+    save_to_cache(cache_data, 'list')
+
+    return render_template('index.html', grouped=sorted_grouped, total_unread=total_unread)
 
 # Get email content for preview
 @app.route('/email/<email_id>', methods=['GET'])

@@ -163,6 +163,23 @@ header {
 .header-actions {
     display: flex;
     gap: 10px;
+    align-items: center;
+}
+
+.unread-count {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: var(--primary-light);
+    color: var(--primary);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.unread-count i {
+    font-size: 16px;
 }
 
 .refresh-button {
@@ -471,5 +488,33 @@ button:hover {
     align-items: center;
     gap: 8px;
     font-size: 13px;
+    color: var(--gray);
+}
+
+.no-emails {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 50px 0;
+    text-align: center;
+    color: var(--gray);
+}
+
+.no-emails i {
+    font-size: 64px;
+    color: var(--secondary);
+    margin-bottom: 20px;
+}
+
+.no-emails h2 {
+    font-size: 24px;
+    font-weight: 400;
+    margin-bottom: 10px;
+    color: var(--dark);
+}
+
+.no-emails p {
+    font-size: 16px;
     color: var(--gray);
 }
