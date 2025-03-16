@@ -28,6 +28,9 @@ logging.basicConfig(
 logger = logging.getLogger('gmail_organizer')
 
 app = Flask(__name__)
+# Add min function to Jinja environment
+app.jinja_env.globals.update(min=min)
+
 # Update scopes to include full access
 SCOPES = ['https://mail.google.com/']
 CACHE_DIR = 'email_cache'
