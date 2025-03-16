@@ -7,11 +7,23 @@ import html
 import pickle
 import time
 import threading
+import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, jsonify
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('gmail_organizer.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('gmail_organizer')
 
 app = Flask(__name__)
 # Update scopes to include full access
@@ -39,10 +51,13 @@ fetch_status = {
 
 # Authenticate with Google
 def get_gmail_service():
+    logger.info("Authenticating with Google")
     creds = None
     if os.path.exists("token.json"):
+        logger.info("Found existing token.json file")
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
     if not creds or not creds.valid:
+        logger.info("No valid credentials found, initiating OAuth flow")
         flow = InstalledAppFlow.from_client_secrets_file(
             "credentials.json",
             SCOPES
@@ -51,6 +66,9 @@ def get_gmail_service():
         creds = flow.run_local_server(port=0, access_type='offline')
         with open("token.json", "w") as token:
             token.write(creds.to_json())
+        logger.info("New credentials obtained and saved to token.json")
+
+    logger.info("Building Gmail API service")
     return build("gmail", "v1", credentials=creds)
 
 # Extract domain from email address
@@ -68,30 +86,41 @@ def extract_domain(email):
 # Check if cache is valid
 def is_cache_valid(cache_file):
     if not os.path.exists(cache_file):
+        logger.debug(f"Cache file {cache_file} does not exist")
         return False
 
     # Check if cache is expired
     file_modified_time = datetime.fromtimestamp(os.path.getmtime(cache_file))
     if datetime.now() - file_modified_time > timedelta(hours=CACHE_EXPIRY):
+        logger.debug(f"Cache file {cache_file} is expired (older than {CACHE_EXPIRY} hours)")
         return False
 
+    logger.debug(f"Cache file {cache_file} is valid")
     return True
 
 # Save emails to cache
 def save_to_cache(data, cache_type='list'):
     cache_file = os.path.join(CACHE_DIR, f'{cache_type}_cache.pkl')
-    with open(cache_file, 'wb') as f:
-        pickle.dump(data, f)
+    logger.debug(f"Saving data to cache file {cache_file}")
+    try:
+        with open(cache_file, 'wb') as f:
+            pickle.dump(data, f)
+        logger.debug(f"Successfully saved data to cache file {cache_file}")
+    except Exception as e:
+        logger.error(f"Error saving to cache file {cache_file}: {e}", exc_info=True)
 
 # Load emails from cache
 def load_from_cache(cache_type='list'):
     cache_file = os.path.join(CACHE_DIR, f'{cache_type}_cache.pkl')
+    logger.debug(f"Attempting to load data from cache file {cache_file}")
     if is_cache_valid(cache_file):
         try:
             with open(cache_file, 'rb') as f:
-                return pickle.load(f)
+                data = pickle.load(f)
+            logger.debug(f"Successfully loaded data from cache file {cache_file}")
+            return data
         except Exception as e:
-            print(f"Error loading cache: {e}")
+            logger.error(f"Error loading cache from {cache_file}: {e}", exc_info=True)
     return None
 
 # Save pagination state
@@ -102,12 +131,19 @@ def save_pagination_state(next_page_token, fetched_count, total_count):
         'total_count': total_count,
         'timestamp': datetime.now().timestamp()
     }
-    with open(os.path.join(CACHE_DIR, 'pagination_state.json'), 'w') as f:
-        json.dump(state, f)
+    state_file = os.path.join(CACHE_DIR, 'pagination_state.json')
+    logger.debug(f"Saving pagination state to {state_file}: {state}")
+    try:
+        with open(state_file, 'w') as f:
+            json.dump(state, f)
+        logger.debug(f"Successfully saved pagination state to {state_file}")
+    except Exception as e:
+        logger.error(f"Error saving pagination state to {state_file}: {e}", exc_info=True)
 
 # Load pagination state
 def load_pagination_state():
     state_file = os.path.join(CACHE_DIR, 'pagination_state.json')
+    logger.debug(f"Attempting to load pagination state from {state_file}")
     if os.path.exists(state_file):
         try:
             with open(state_file, 'r') as f:
@@ -115,9 +151,12 @@ def load_pagination_state():
 
             # Check if state is still valid (less than 1 hour old)
             if datetime.now().timestamp() - state.get('timestamp', 0) < 3600:
+                logger.debug(f"Successfully loaded valid pagination state from {state_file}")
                 return state
+            else:
+                logger.debug(f"Pagination state from {state_file} is expired")
         except Exception as e:
-            print(f"Error loading pagination state: {e}")
+            logger.error(f"Error loading pagination state from {state_file}: {e}", exc_info=True)
     return None
 
 # Fetch a batch of emails
@@ -126,14 +165,17 @@ def fetch_email_batch(page_token=None):
 
     # Get total unread count if we don't have it yet
     if fetch_status['total_emails'] == 0:
+        logger.info("Fetching total unread email count")
         result = service.users().messages().list(
             userId='me',
             q='is:unread',
             maxResults=1
         ).execute()
         fetch_status['total_emails'] = result.get('resultSizeEstimate', 0)
+        logger.info(f"Total unread emails: {fetch_status['total_emails']}")
 
     # Fetch a page of messages
+    logger.info(f"Fetching batch of emails with page token: {page_token}")
     results = service.users().messages().list(
         userId='me',
         q='is:unread',
@@ -142,10 +184,12 @@ def fetch_email_batch(page_token=None):
     ).execute()
 
     messages = results.get('messages', [])
+    logger.info(f"Fetched {len(messages)} messages in this batch")
     email_data = []
 
     # Process each message in the current page
     for msg in messages:
+        logger.debug(f"Fetching details for message ID: {msg['id']}")
         msg_detail = service.users().messages().get(userId='me', id=msg['id']).execute()
         headers = msg_detail['payload']['headers']
         sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
@@ -162,6 +206,7 @@ def fetch_email_batch(page_token=None):
 
     # Get next page token
     next_page_token = results.get('nextPageToken')
+    logger.info(f"Next page token: {next_page_token}")
 
     return email_data, next_page_token
 
@@ -175,6 +220,7 @@ def fetch_emails_background():
     try:
         # Set last fetch time
         fetch_status['last_fetch_time'] = datetime.now()
+        logger.info("Starting background email fetch process")
 
         # Load existing emails from cache
         cached_data = load_from_cache('list')
@@ -186,14 +232,17 @@ def fetch_emails_background():
             # Update fetch status with cached data
             fetch_status['fetched_emails'] = len(email_data)
             fetch_status['grouped_emails'] = cached_data['grouped']
+            logger.info(f"Loaded {len(email_data)} emails from cache")
 
             # Load pagination state
             pagination_state = load_pagination_state()
             if pagination_state:
                 fetch_status['next_page_token'] = pagination_state.get('next_page_token')
                 fetch_status['total_emails'] = pagination_state.get('total_count', 0)
+                logger.info(f"Loaded pagination state: next_page_token={fetch_status['next_page_token']}, total_emails={fetch_status['total_emails']}")
         else:
             email_data = []
+            logger.info("No valid cache found, starting fresh fetch")
 
         # Continue fetching from where we left off
         next_page_token = fetch_status['next_page_token']
@@ -203,6 +252,7 @@ def fetch_emails_background():
             if fetch_status['is_paused']:
                 # Save current state to cache before pausing
                 if email_data:
+                    logger.info(f"Pausing fetch with {len(email_data)} emails fetched so far. Saving to cache.")
                     df = pd.DataFrame(email_data)
                     if not df.empty:
                         grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
@@ -221,19 +271,22 @@ def fetch_emails_background():
 
                 # Set is_fetching to false while paused
                 fetch_status['is_fetching'] = False
-                print("Email fetching paused")
+                logger.info("Email fetching paused")
 
                 # Exit the fetch loop
                 break
 
             # Fetch a batch of emails
+            logger.info(f"Fetching next batch of emails with token: {next_page_token}")
             new_emails, next_page_token = fetch_email_batch(next_page_token)
 
             if not new_emails:
+                logger.info("No more emails to fetch")
                 break  # No more emails to fetch
 
             # Add new emails to the list
             email_data.extend(new_emails)
+            logger.info(f"Added {len(new_emails)} new emails. Total fetched: {len(email_data)}")
 
             # Update fetch status
             fetch_status['fetched_emails'] = len(email_data)
@@ -242,6 +295,7 @@ def fetch_emails_background():
 
             # Save pagination state
             save_pagination_state(next_page_token, len(email_data), fetch_status['total_emails'])
+            logger.info(f"Updated pagination state: next_page_token={next_page_token}, fetched_emails={len(email_data)}")
 
             # Process and update grouped emails
             df = pd.DataFrame(email_data)
@@ -249,6 +303,7 @@ def fetch_emails_background():
                 grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
                 sorted_grouped = sort_grouped_emails(grouped)
                 fetch_status['grouped_emails'] = sorted_grouped
+                logger.info(f"Grouped emails by domain. Found {len(sorted_grouped)} domains.")
 
                 # Save to cache
                 cache_data = {
@@ -256,13 +311,16 @@ def fetch_emails_background():
                     'total_unread': fetch_status['total_emails']
                 }
                 save_to_cache(cache_data, 'list')
+                logger.info("Saved grouped emails to cache")
 
             # If no more pages, break
             if not next_page_token:
+                logger.info("No next page token, fetch complete")
                 break
 
             # If we've fetched enough emails, stop
             if len(email_data) >= MAX_TOTAL_EMAILS:
+                logger.info(f"Reached maximum email limit ({MAX_TOTAL_EMAILS}), stopping fetch")
                 break
 
             # Small delay to prevent API rate limiting
@@ -270,6 +328,7 @@ def fetch_emails_background():
 
         # Final update to cache
         if email_data and not fetch_status['is_paused']:
+            logger.info("Performing final cache update")
             df = pd.DataFrame(email_data)
             if not df.empty:
                 grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
@@ -287,10 +346,10 @@ def fetch_emails_background():
             # Only set is_fetching to False if not paused (if paused, we already set it above)
             if not fetch_status['is_paused']:
                 fetch_status['is_fetching'] = False
-                print("Email fetching completed")
+                logger.info("Email fetching completed")
 
     except Exception as e:
-        print(f"Error fetching emails: {e}")
+        logger.error(f"Error fetching emails: {e}", exc_info=True)
         fetch_status['error'] = str(e)
         fetch_status['is_fetching'] = False
 
@@ -298,6 +357,7 @@ def fetch_emails_background():
 @app.route('/')
 def index():
     global fetch_status
+    logger.info("Index page requested")
 
     # Try to load from cache first
     cached_data = load_from_cache('list')
@@ -307,6 +367,7 @@ def index():
         # Use cached data for initial render
         initial_data = sort_grouped_emails(cached_data['grouped'])
         total_unread = cached_data['total_unread']
+        logger.info(f"Loaded cached data with {total_unread} total unread emails across {len(initial_data)} domains")
 
         # Start background fetching to update cache
         if not fetch_status['is_fetching']:
@@ -314,6 +375,7 @@ def index():
             fetch_status['grouped_emails'] = initial_data
             fetch_status['total_emails'] = total_unread
             fetch_status['fetched_emails'] = sum(len(emails) for emails in initial_data.values())
+            logger.info(f"Starting background fetch with {fetch_status['fetched_emails']} emails already cached")
 
             thread = threading.Thread(target=fetch_emails_background)
             thread.daemon = True
@@ -326,16 +388,19 @@ def index():
                               is_loading=fetch_status['is_fetching'])
     else:
         # If no cache, fetch first batch synchronously for immediate display
+        logger.info("No valid cache found, fetching initial batch synchronously")
         try:
             email_data, next_page_token = fetch_email_batch()
             fetch_status['next_page_token'] = next_page_token
 
             if email_data:
+                logger.info(f"Fetched initial batch with {len(email_data)} emails")
                 df = pd.DataFrame(email_data)
                 grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
                 initial_data = sort_grouped_emails(grouped)
                 fetch_status['grouped_emails'] = initial_data
                 fetch_status['fetched_emails'] = len(email_data)
+                logger.info(f"Grouped initial emails into {len(initial_data)} domains")
 
                 # Save to cache
                 cache_data = {
@@ -343,26 +408,31 @@ def index():
                     'total_unread': fetch_status['total_emails']
                 }
                 save_to_cache(cache_data, 'list')
+                logger.info("Saved initial data to cache")
 
                 # Save pagination state
                 save_pagination_state(next_page_token, len(email_data), fetch_status['total_emails'])
+                logger.info(f"Saved pagination state with next_page_token={next_page_token}")
             else:
                 initial_data = {}
+                logger.info("No emails found in initial fetch")
 
             total_unread = fetch_status['total_emails']
         except Exception as e:
-            print(f"Error fetching initial emails: {e}")
+            logger.error(f"Error fetching initial emails: {e}", exc_info=True)
             initial_data = {}
             total_unread = 0
 
     # Start background fetching if not already running
     if not fetch_status['is_fetching']:
         fetch_status['is_fetching'] = True
+        logger.info("Starting background fetch process")
         thread = threading.Thread(target=fetch_emails_background)
         thread.daemon = True
         thread.start()
 
     # Render the template with whatever data we have
+    logger.info(f"Rendering index template with {total_unread} total emails, {len(initial_data or {})} domains")
     return render_template('index.html',
                           grouped=initial_data or {},
                           total_unread=total_unread,
@@ -402,10 +472,12 @@ def check_fetch_status():
 def fetch_more():
     page_token = request.args.get('page_token', None)
     current_count = int(request.args.get('current_count', 0))
+    logger.info(f"Fetch more requested with page_token={page_token}, current_count={current_count}")
 
     service = get_gmail_service()
 
     # Fetch the next page of messages
+    logger.info("Fetching next page of messages")
     results = service.users().messages().list(
         userId='me',
         q='is:unread',
@@ -414,9 +486,11 @@ def fetch_more():
     ).execute()
 
     messages = results.get('messages', [])
+    logger.info(f"Fetched {len(messages)} messages in this batch")
     email_data = []
 
     for msg in messages:
+        logger.debug(f"Fetching details for message ID: {msg['id']}")
         msg_detail = service.users().messages().get(userId='me', id=msg['id']).execute()
         headers = msg_detail['payload']['headers']
         sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
@@ -435,14 +509,18 @@ def fetch_more():
     df = pd.DataFrame(email_data)
     if not df.empty:
         grouped = df.groupby('domain').apply(lambda x: x.to_dict(orient='records'), include_groups=False).to_dict()
+        logger.info(f"Grouped {len(email_data)} emails into {len(grouped)} domains")
     else:
         grouped = {}
+        logger.info("No emails to group in this batch")
 
     next_page_token = results.get('nextPageToken')
+    logger.info(f"Next page token: {next_page_token}")
 
     # Save pagination state
     total_fetched = current_count + len(email_data)
     save_pagination_state(next_page_token, total_fetched, fetch_status['total_emails'])
+    logger.info(f"Updated pagination state: total_fetched={total_fetched}")
 
     return jsonify({
         'emails': grouped,
@@ -454,18 +532,22 @@ def fetch_more():
 # Get email content for preview
 @app.route('/email/<email_id>', methods=['GET'])
 def get_email(email_id):
+    logger.info(f"Fetching email content for ID: {email_id}")
     # Try to load from cache first
     cache_file = os.path.join(CACHE_DIR, f'email_{email_id}.pkl')
     if is_cache_valid(cache_file):
         try:
+            logger.info(f"Loading email {email_id} from cache")
             with open(cache_file, 'rb') as f:
                 return jsonify(pickle.load(f))
         except Exception as e:
-            print(f"Error loading email cache: {e}")
+            logger.error(f"Error loading email cache: {e}", exc_info=True)
 
     # If no valid cache, fetch from Gmail API
+    logger.info(f"Fetching email {email_id} from Gmail API")
     service = get_gmail_service()
     msg = service.users().messages().get(userId='me', id=email_id, format='full').execute()
+    logger.info(f"Successfully fetched email {email_id} from API")
 
     # Extract headers
     headers = msg['payload']['headers']
@@ -502,6 +584,7 @@ def get_email(email_id):
     }
 
     # Save to cache
+    logger.info(f"Saving email {email_id} to cache")
     with open(cache_file, 'wb') as f:
         pickle.dump(email_data, f)
 
@@ -514,35 +597,70 @@ def action():
     email_ids = request.form.getlist('email_ids')
     action_type = request.form['action_type']
 
+    logger.info(f"Performing {action_type} action on {len(email_ids)} emails")
+
     for email_id in email_ids:
-        if action_type == 'read':
-            service.users().messages().modify(userId='me', id=email_id, body={'removeLabelIds': ['UNREAD']}).execute()
-        elif action_type == 'delete':
-            service.users().messages().delete(userId='me', id=email_id).execute()
-            # Remove from cache if deleted
-            cache_file = os.path.join(CACHE_DIR, f'email_{email_id}.pkl')
-            if os.path.exists(cache_file):
-                os.remove(cache_file)
-        elif action_type == 'archive':
-            service.users().messages().modify(userId='me', id=email_id, body={'removeLabelIds': ['INBOX']}).execute()
+        try:
+            if action_type == 'read':
+                logger.info(f"Marking email {email_id} as read")
+                result = service.users().messages().modify(
+                    userId='me',
+                    id=email_id,
+                    body={'removeLabelIds': ['UNREAD']}
+                ).execute()
+                logger.info(f"Successfully marked email {email_id} as read. Result: {result}")
+
+            elif action_type == 'delete':
+                logger.info(f"Deleting email {email_id}")
+                # First get the email details for logging purposes
+                try:
+                    email_details = service.users().messages().get(
+                        userId='me',
+                        id=email_id,
+                        format='metadata',
+                        metadataHeaders=['Subject', 'From']
+                    ).execute()
+
+                    headers = email_details.get('payload', {}).get('headers', [])
+                    subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+                    sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+                    logger.info(f"About to delete email - ID: {email_id}, Subject: {subject}, From: {sender}")
+                except Exception as e:
+                    logger.warning(f"Could not fetch email details before deletion: {e}")
+
+                # Now delete the email
+                result = service.users().messages().delete(userId='me', id=email_id).execute()
+                logger.info(f"Successfully deleted email {email_id}. Result: {result}")
+
+                # Remove from cache if deleted
+                cache_file = os.path.join(CACHE_DIR, f'email_{email_id}.pkl')
+                if os.path.exists(cache_file):
+                    os.remove(cache_file)
+                    logger.info(f"Removed email {email_id} from cache")
+
+            elif action_type == 'archive':
+                logger.info(f"Archiving email {email_id}")
+                result = service.users().messages().modify(
+                    userId='me',
+                    id=email_id,
+                    body={'removeLabelIds': ['INBOX']}
+                ).execute()
+                logger.info(f"Successfully archived email {email_id}. Result: {result}")
+        except Exception as e:
+            logger.error(f"Error performing {action_type} action on email {email_id}: {e}", exc_info=True)
 
     # Clear the list cache since the email list has changed
     list_cache = os.path.join(CACHE_DIR, 'list_cache.pkl')
     if os.path.exists(list_cache):
         os.remove(list_cache)
+        logger.info("Cleared list cache after performing actions")
 
     # Clear pagination state
     pagination_file = os.path.join(CACHE_DIR, 'pagination_state.json')
     if os.path.exists(pagination_file):
         os.remove(pagination_file)
+        logger.info("Cleared pagination state after performing actions")
 
-    return redirect('/')
-
-# Clear cache route
-@app.route('/clear-cache', methods=['GET'])
-def clear_cache():
-    for file in os.listdir(CACHE_DIR):
-        os.remove(os.path.join(CACHE_DIR, file))
     return redirect('/')
 
 # Pause email fetching
@@ -551,7 +669,7 @@ def pause_fetch():
     global fetch_status
 
     fetch_status['is_paused'] = True
-    print("Pausing email fetch process")
+    logger.info("Pausing email fetch process via API endpoint")
 
     return jsonify({
         'status': 'paused',
@@ -567,7 +685,7 @@ def resume_fetch():
     if fetch_status['is_paused']:
         fetch_status['is_paused'] = False
         fetch_status['is_fetching'] = True
-        print("Resuming email fetch process")
+        logger.info("Resuming email fetch process via API endpoint")
 
         thread = threading.Thread(target=fetch_emails_background)
         thread.daemon = True
@@ -578,6 +696,7 @@ def resume_fetch():
             'message': 'Email fetching resumed'
         })
     else:
+        logger.warning("Attempted to resume fetch process that was not paused")
         return jsonify({
             'status': 'error',
             'message': 'Email fetching was not paused'
@@ -588,15 +707,40 @@ def resume_fetch():
 def fetch_logs():
     global fetch_status
 
+    status = 'paused' if fetch_status['is_paused'] else ('fetching' if fetch_status['is_fetching'] else 'complete')
+    last_fetch_time_str = fetch_status['last_fetch_time'].strftime('%Y-%m-%d %H:%M:%S') if fetch_status['last_fetch_time'] else None
+
     logs = {
-        'status': 'paused' if fetch_status['is_paused'] else ('fetching' if fetch_status['is_fetching'] else 'complete'),
+        'status': status,
         'fetched': fetch_status['fetched_emails'],
         'total': fetch_status['total_emails'],
-        'last_fetch_time': fetch_status['last_fetch_time'].strftime('%Y-%m-%d %H:%M:%S') if fetch_status['last_fetch_time'] else None,
+        'last_fetch_time': last_fetch_time_str,
         'error': fetch_status['error']
     }
 
+    logger.info(f"Fetch logs requested: {logs}")
     return jsonify(logs)
 
+# Clear cache route
+@app.route('/clear-cache', methods=['GET'])
+def clear_cache():
+    logger.info("Clearing all cache files")
+    count = 0
+    for file in os.listdir(CACHE_DIR):
+        file_path = os.path.join(CACHE_DIR, file)
+        try:
+            os.remove(file_path)
+            count += 1
+        except Exception as e:
+            logger.error(f"Error removing cache file {file_path}: {e}")
+
+    logger.info(f"Cleared {count} cache files")
+    return redirect('/')
+
 if __name__ == '__main__':
+    logger.info("=== Gmail Organizer starting up ===")
+    logger.info(f"Cache directory: {CACHE_DIR}")
+    logger.info(f"Max emails per page: {MAX_EMAILS_PER_PAGE}")
+    logger.info(f"Max total emails: {MAX_TOTAL_EMAILS}")
+    logger.info(f"Cache expiry: {CACHE_EXPIRY} hours")
     app.run(debug=True)
