@@ -69,10 +69,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Update current count
                     currentEmailCount = data.fetched;
 
-                    // Update progress bar
+                    // Update progress bar - use fetched count as percentage of total
+                    // If total is 0, set progress to 100%
                     if (totalUnreadCount > 0) {
-                        const progressPercent = (currentEmailCount / totalUnreadCount) * 100;
+                        const progressPercent = Math.min((currentEmailCount / totalUnreadCount) * 100, 100);
                         progressFill.style.width = `${progressPercent}%`;
+                    } else {
+                        progressFill.style.width = '100%';
                     }
 
                     // If this is the first update after initial load, mark it complete
@@ -84,6 +87,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         loadingIndicators.forEach(indicator => {
                             indicator.style.display = 'none';
                         });
+                    }
+                }
+
+                // If total count is less than fetched count, update total to match fetched
+                // This can happen if our initial estimate was too low
+                if (totalUnreadCount < currentEmailCount) {
+                    totalUnreadCount = currentEmailCount;
+                    document.querySelector('.unread-count span').textContent = `${totalUnreadCount} Unread Emails`;
+
+                    const totalCountEl = document.getElementById('total-count');
+                    if (totalCountEl) {
+                        totalCountEl.textContent = totalUnreadCount;
+                    }
+
+                    // Update progress bar to show 100% if we've fetched all emails
+                    if (data.status === 'complete') {
+                        progressFill.style.width = '100%';
                     }
                 }
 
@@ -106,7 +126,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Show load more button if there are more emails to fetch
                     const loadMoreBtn = document.getElementById('load-more-btn');
                     if (loadMoreBtn) {
-                        if (currentEmailCount < totalUnreadCount) {
+                        if (data.status === 'paused' && currentEmailCount < totalUnreadCount) {
                             loadMoreBtn.style.display = 'block';
                         } else {
                             loadMoreBtn.style.display = 'none';

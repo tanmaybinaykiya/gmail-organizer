@@ -14,6 +14,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -163,19 +165,9 @@ def load_pagination_state():
 def fetch_email_batch(page_token=None):
     service = get_gmail_service()
 
-    # Get total unread count if we don't have it yet
-    if fetch_status['total_emails'] == 0:
-        logger.info("Fetching total unread email count")
-        result = service.users().messages().list(
-            userId='me',
-            q='is:unread',
-            maxResults=1
-        ).execute()
-        fetch_status['total_emails'] = result.get('resultSizeEstimate', 0)
-        logger.info(f"Total unread emails: {fetch_status['total_emails']}")
-
-    # Fetch a page of messages
-    logger.info(f"Fetching batch of emails with page token: {page_token}")
+    # We won't rely on the API's resultSizeEstimate as it seems inaccurate
+    # Instead, we'll count the actual emails we fetch
+    logger.info("Fetching batch of emails with page token: {page_token}")
     results = service.users().messages().list(
         userId='me',
         q='is:unread',
@@ -185,6 +177,21 @@ def fetch_email_batch(page_token=None):
 
     messages = results.get('messages', [])
     logger.info(f"Fetched {len(messages)} messages in this batch")
+
+    # If this is the first batch and we don't have a total count yet,
+    # set a reasonable initial estimate based on what we've fetched
+    if fetch_status['total_emails'] == 0 and messages:
+        # If we got a full page, there are likely more emails
+        if len(messages) == MAX_EMAILS_PER_PAGE:
+            # Set an initial estimate that's higher than what we've fetched
+            # We'll adjust this as we fetch more
+            fetch_status['total_emails'] = len(messages) * 3  # Arbitrary multiplier
+            logger.info(f"Setting initial total email estimate to {fetch_status['total_emails']}")
+        else:
+            # If we got less than a full page, this is likely all the emails
+            fetch_status['total_emails'] = len(messages)
+            logger.info(f"Setting total email count to {len(messages)} based on first batch")
+
     email_data = []
 
     # Process each message in the current page
@@ -207,6 +214,15 @@ def fetch_email_batch(page_token=None):
     # Get next page token
     next_page_token = results.get('nextPageToken')
     logger.info(f"Next page token: {next_page_token}")
+
+    # If we have no next page token and we're still using our initial estimate,
+    # update the total count to match what we've actually fetched
+    if not next_page_token and fetch_status['fetched_emails'] > 0:
+        # Update total to match what we've actually fetched
+        new_total = fetch_status['fetched_emails'] + len(email_data)
+        if new_total != fetch_status['total_emails']:
+            logger.info(f"Updating total email count from {fetch_status['total_emails']} to {new_total} based on actual fetched emails")
+            fetch_status['total_emails'] = new_total
 
     return email_data, next_page_token
 
@@ -238,7 +254,11 @@ def fetch_emails_background():
             pagination_state = load_pagination_state()
             if pagination_state:
                 fetch_status['next_page_token'] = pagination_state.get('next_page_token')
-                fetch_status['total_emails'] = pagination_state.get('total_count', 0)
+                # Use the fetched count as our total if we have it
+                if pagination_state.get('fetched_count', 0) > 0:
+                    fetch_status['total_emails'] = pagination_state.get('fetched_count')
+                else:
+                    fetch_status['total_emails'] = pagination_state.get('total_count', 0)
                 logger.info(f"Loaded pagination state: next_page_token={fetch_status['next_page_token']}, total_emails={fetch_status['total_emails']}")
         else:
             email_data = []
@@ -293,6 +313,12 @@ def fetch_emails_background():
             fetch_status['next_page_token'] = next_page_token
             fetch_status['last_fetch_time'] = datetime.now()
 
+            # If we don't have a next page token, we've fetched all emails
+            # Update the total count to match what we've actually fetched
+            if not next_page_token:
+                fetch_status['total_emails'] = len(email_data)
+                logger.info(f"No more pages, setting total email count to {len(email_data)}")
+
             # Save pagination state
             save_pagination_state(next_page_token, len(email_data), fetch_status['total_emails'])
             logger.info(f"Updated pagination state: next_page_token={next_page_token}, fetched_emails={len(email_data)}")
@@ -335,6 +361,10 @@ def fetch_emails_background():
                 sorted_grouped = sort_grouped_emails(grouped)
             else:
                 sorted_grouped = {}
+
+            # Update total emails to match what we've actually fetched
+            fetch_status['total_emails'] = len(email_data)
+            logger.info(f"Final update: setting total email count to {len(email_data)}")
 
             cache_data = {
                 'grouped': sorted_grouped,

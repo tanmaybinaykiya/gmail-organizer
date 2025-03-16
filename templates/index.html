@@ -54,11 +54,11 @@
                     <div class="fetch-status-display">
                         <div class="fetch-progress">
                             <div class="progress-bar">
-                                <div class="progress-fill" style="width: {% if total_unread > 0 %}{{ (fetched_emails|default(0) / total_unread * 100)|round }}{% else %}0{% endif %}%"></div>
+                                <div class="progress-fill" style="width: {% if total_unread > 0 %}{{ min(100, (fetched_emails|default(0) / total_unread * 100)|round) }}{% else %}0{% endif %}%"></div>
                             </div>
                             <div class="progress-text">
                                 <span id="fetched-count">{{ fetched_emails|default(0) }}</span> of
-                                <span id="total-count">{{ total_unread }}</span> emails loaded
+                                <span id="total-count">{{ total_unread if total_unread > fetched_emails|default(0) else fetched_emails|default(0) }}</span> emails loaded
                             </div>
                         </div>
                         <div class="fetch-status">
