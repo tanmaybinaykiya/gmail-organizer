@@ -1,6 +1,6 @@
 :root {
-    --primary: #4285f4; /* Gmail blue */
-    --primary-light: #e8f0fe;
+    --primary: #ea4335; /* Gmail red as primary */
+    --primary-light: #fce8e6; /* Light red */
     --secondary: #34a853; /* Gmail green */
     --danger: #ea4335; /* Gmail red */
     --warning: #fbbc04; /* Gmail yellow */
